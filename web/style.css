@@ -187,6 +187,7 @@ code { background: #1f2733; padding: 1px 5px; border-radius: 5px; font-size: 12p
 .planHead { display: flex; gap: 8px; align-items: baseline; }
 .planHead b { font-weight: 600; font-size: 12px; }
 .planHead .state { margin-left: auto; font-size: 11px; }
+.shortBadge { padding: 0 5px; border: 1px solid #6b4d13; border-radius: 999px; background: #2a1f0b; color: #fbbf24; font-size: 10px; line-height: 1.6; white-space: nowrap; }
 .state.done { color: var(--accent); }
 .state.failed { color: var(--danger); }
 .state.generating, .state.promptReady { color: #fbbf24; }

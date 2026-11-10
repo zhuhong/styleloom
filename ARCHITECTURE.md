@@ -132,6 +132,8 @@ Agent 在规划前 `search_skills`、命中后 `read_skill`，把 prompt fragmen
 
 `shot.generationMode` 可以强制模式（`auto` / `t2va` / `i2va` / `fl2va` / `l2va` / `ref2va`）。实测“人物定妆照 + 空场景照”两张参考图走 `ref2va` 时，身份、服装、房间与构图明显比纯文字稳定；纯文字更适合不想依赖图片模型、且允许一定漂移的场景。
 
+时长：分镜允许 1–15 秒整数，H3 常规下限 4 秒。低于 4 秒时 `generate_shot` 默认按 4 秒请求，再用 ffmpeg 裁到目标时长；只有 `experimentalDuration=true` 才把 2/3 秒直接发给平台，用来验证 H3 的短档位。
+
 提示词有两种来源：
 
 1. **LLM 编写**：把分镜、风格圣经、参考标签交给提示词导演模型，要求按官方结构输出；长度超限会再请求一次压缩。

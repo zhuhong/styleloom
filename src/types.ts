@@ -166,7 +166,7 @@ export type ShotPlan = {
   id: string;
   index: number;
   title: string;
-  /** H3 只接受 4-15 秒整数 */
+  /** 分镜时长 1-15 秒；H3 常规下限 4 秒，低于 4 秒由生成层裁剪或实验直发 */
   durationSeconds: number;
   action: string;
   dialogue?: string;

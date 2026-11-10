@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { loadSettings } from "../../config";
+import { MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "../../util/duration";
 import { mimeFromPath } from "../llm";
 
 const validRatios = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "auto"];
@@ -87,8 +88,9 @@ export async function generateVideoJob(request: VideoJob): Promise<VideoResult> 
   if (!apiKey) throw new Error("尚未配置 icompify API Key");
   const baseUrl = settings.video.baseUrl.trim().replace(/\/+$/, "").replace(/\/v1$/, "");
   const duration = Math.round(request.durationSeconds);
-  if (!Number.isInteger(duration) || duration < 4 || duration > 15) {
-    throw new Error("H3 视频时长必须是 4 到 15 秒之间的整数");
+  // H3 常规下限 4s；2/3s 属于实验档位，由 generate/shot.ts 决定直发还是 4s+裁剪。
+  if (!Number.isInteger(duration) || duration < MIN_SHOT_SECONDS || duration > MAX_SHOT_SECONDS) {
+    throw new Error(`H3 视频时长必须是 ${MIN_SHOT_SECONDS} 到 ${MAX_SHOT_SECONDS} 秒之间的整数`);
   }
   const ratio = request.aspectRatio ?? settings.video.aspectRatio ?? "16:9";
   if (!validRatios.includes(ratio)) throw new Error(`不支持的画幅：${ratio}，可选 ${validRatios.join("、")}`);

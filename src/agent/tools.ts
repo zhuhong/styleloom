@@ -11,6 +11,7 @@ import { studyReferenceVideo } from "../learn/study";
 import { generateShot } from "../generate/shot";
 import { generateStill } from "../generate/still";
 import { stitchShots } from "../generate/stitch";
+import { H3_SAFE_MIN_SECONDS, normalizeShotDuration } from "../util/duration";
 import { composeShotPrompt, prepareReferences } from "../generate/prompt";
 import { downloadXhsVideo, extractUrlFromText, isXhsUrl } from "../providers/download/xhs";
 import { exportPublicSkill, mergeSkills, readSkillResolved, recordSkillOutcome, searchSkills, skillToSummary, updateSkill } from "../store/skills";
@@ -264,7 +265,7 @@ export const toolSpecs: ToolSpec[] = [
   },
   {
     name: "plan_shots",
-    description: "写入/替换分镜表。每个镜头 4-15 秒整数；action/camera/lighting/sound 用英文写，便于直接进入 H3 提示词。",
+    description: "写入/替换分镜表。每个镜头 1-15 秒整数；4 秒以下属于实验/裁剪档位。action/camera/lighting/sound 用英文写，便于直接进入 H3 提示词。",
     parameters: {
       type: "object",
       properties: {
@@ -274,7 +275,7 @@ export const toolSpecs: ToolSpec[] = [
             type: "object",
             properties: {
               title: { type: "string" },
-              durationSeconds: { type: "number", description: "4-15 的整数" },
+              durationSeconds: { type: "number", description: "1-15 的整数；低于 4 秒时生成默认按 4 秒生成后裁剪" },
               action: { type: "string", description: "英文，可观察的动作与因果" },
               dialogue: { type: "string", description: "逐字对白，没有则留空" },
               camera: { type: "string", description: "英文，运镜类型+幅度+速度+动机" },
@@ -319,13 +320,15 @@ export const toolSpecs: ToolSpec[] = [
   },
   {
     name: "generate_shot",
-    description: "调用 MiniMax H3 生成单个镜头视频（会产生费用）。必须先向用户展示分镜/提示词并获得明确同意，然后传 confirmed=true。",
+    description: "调用 MiniMax H3 生成单个镜头视频（会产生费用）。时长默认取分镜；低于 4 秒时默认按 4 秒生成后本地裁剪，只有 experimentalDuration=true 才直接请求短时长（用于验证 H3 档位）。必须先向用户展示分镜/提示词并获得明确同意，然后传 confirmed=true。",
     parameters: {
       type: "object",
       properties: {
         shotId: { type: "string" },
         confirmed: { type: "boolean", description: "用户已明确同意生成" },
         promptOverride: { type: "string", description: "可选，直接使用该提示词" },
+        durationSeconds: { type: "number", description: "可选，覆盖分镜时长；1-15 秒整数" },
+        experimentalDuration: { type: "boolean", description: "低于 4 秒时是否直接请求 H3；默认 false，按 4 秒生成后裁剪" },
         skillIds: { type: "array", items: { type: "string" }, description: "本次实际采用的技能 id，用于统计效果" },
       },
       required: ["shotId", "confirmed"],
@@ -520,8 +523,7 @@ async function planShots(ctx: ToolContext, args: Args) {
   const manifest = await getManifest(ctx.project);
   const plan: ShotPlan[] = raw.map((item, index) => {
     const value = record(item);
-    const duration = Math.round(Number(value.durationSeconds ?? 5));
-    if (!Number.isInteger(duration) || duration < 4 || duration > 15) throw new Error(`第 ${index + 1} 个镜头时长必须是 4-15 秒整数`);
+    const duration = normalizeShotDuration(value.durationSeconds ?? 5, `第 ${index + 1} 个镜头`);
     const characterIds = stringArray(value, "characterIds");
     const locationId = optString(value, "locationId");
     if (bible) {
@@ -558,10 +560,14 @@ async function planShots(ctx: ToolContext, args: Args) {
   ctx.project.plan = plan;
   if (ctx.project.stage !== "generate") ctx.project.stage = "plan";
   await ctx.save();
+  const shortShots = plan.filter(shot => shot.durationSeconds < H3_SAFE_MIN_SECONDS);
   return {
     ok: true,
     totalSeconds: plan.reduce((total, shot) => total + shot.durationSeconds, 0),
     shots: plan.map(shot => ({ id: shot.id, title: shot.title, durationSeconds: shot.durationSeconds, status: shot.status })),
+    ...(shortShots.length ? {
+      warnings: shortShots.map(shot => `${shot.id} 时长 ${shot.durationSeconds}s 低于 H3 常规下限 ${H3_SAFE_MIN_SECONDS}s；generate_shot 默认按 ${H3_SAFE_MIN_SECONDS}s 生成后裁剪，experimentalDuration=true 才会直接请求短时长。`),
+    } : {}),
   };
 }
 
@@ -606,6 +612,8 @@ async function generateShotTool(ctx: ToolContext, args: Args) {
     settings: ctx.settings,
     shotId,
     promptOverride: optString(args, "promptOverride"),
+    durationSeconds: optNumber(args, "durationSeconds"),
+    experimentalDuration: args.experimentalDuration === true,
     skillIds: args.skillIds === undefined ? shot?.skillIds : stringArray(args, "skillIds"),
     signal: ctx.signal,
     onProgress: (percent, label) => ctx.emit({ type: "progress", scope: "generate_shot", percent, label }),

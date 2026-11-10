@@ -99,7 +99,7 @@ Everything lives in `data/settings.json` (or the in-app **Settings** dialog). `d
 2. **The agent studies** — Xiaohongshu links are downloaded first (`download_xhs_video`), then `study_reference_video` slices, annotates, distills and extracts skills, streaming progress to the page.
 3. **Review the study** — the agent reports characters, locations, camera grammar and rhythm in plain language; ask for corrections and it will call `update_style_bible`.
 4. **Generate stills** — `generate_still` for character/location references (falls back to reference keyframes if no image model is configured, and says so).
-5. **Plan shots** — `plan_shots`, 4–15 second integers per shot; set `referenceShotIds` when a shot should inherit a reference camera move.
+5. **Plan shots** — `plan_shots`, 1–15 second integers per shot (H3's safe minimum is 4s; shorter shots are trimmed or sent experimentally); set `referenceShotIds` when a shot should inherit a reference camera move.
 6. **Preview the prompt** — `build_shot_prompt`, free. The mode (T2VA / I2VA / FL2VA / L2VA / Ref2VA) is chosen automatically from available material.
 7. **Render** — `generate_shot(confirmed=true)` only after you have seen and approved the plan.
 8. **Give feedback** — say "that shot is good / meh / bad"; the agent calls `record_skill_outcome` to update skill confidence.
@@ -150,7 +150,7 @@ Before planning, the agent calls `search_skills` and then `read_skill`, dropping
 | only character/location stills | I2VA | `fl2va` / `minimax-h3-fl2va` |
 | nothing | T2VA | `t2va` / `minimax-h3-fl2va` |
 
-Reference order: characters (`<Subject N>` / `<Picture N>`) → locations (`<Picture N>`) → reference clips (`<Video N>`). Platform limits: 4 images, 3 videos, 4–15 seconds, ≤140MB per asset.
+Reference order: characters (`<Subject N>` / `<Picture N>`) → locations (`<Picture N>`) → reference clips (`<Video N>`). Platform limits: 4 images, 3 videos, 4–15 seconds, ≤140MB per asset. The tool accepts 1–15s and falls back to 4s+trim for short shots.
 
 Prompts come from an LLM director call that must follow the official structure; anything missing, misordered, or over 7000 characters falls back to a deterministic skeleton that is valid by construction. `validatePrompt` enforces field presence and order, verbatim alignment sentences, six sections for Ref2VA, and the length cap.
 
@@ -175,7 +175,7 @@ src/
 ├── generate/             reference decision, H3 prompt, single shot, stills
 ├── providers/            llm / image / download(xhs) / video(icompify) — protocol only
 ├── store/                projects, manifests, sessions, style packs, skills
-└── util/                 fs and ffmpeg primitives
+└── util/                 fs, ffmpeg and duration primitives
 web/                      dependency-free HTML/CSS/JS front end
 skills/                    public read-only skill library (knowledge only, no evidence images)
 docs/                     skills, xhs download, H3 prompting, examples
@@ -213,8 +213,9 @@ Verified end to end:
 - One real billed H3 Ref2VA render from a character still + an empty location still: 9s, 9:16, 768×1344, with audio, ~248s; the VLM check rated identity, room and framing "highly consistent", with no crop or drift and only minor hand/switch-panel artifacts.
 - A second reference (120s Xiaohongshu climbing video, 16 shots): 8 skills extracted; a 9s Ref2VA climbing shot rendered in ~248s and rated "highly consistent" for action, identity and gym layout; five camera/lighting/color skills moved to `active` (0.80).
 - Timeline stitching: `stitch_shots` normalizes clips with ffmpeg, then hard-cuts or crossfades into a final H.264/AAC asset. Verified on the 4-shot `名画上街` project: 20.73s hard cut, 19.84s with a 0.3s crossfade.
+- Short-shot handling: `plan_shots` accepts 1–15s; local 4s→2s trim is verified with ffmpeg. H3's 2/3s direct tier is exposed via `experimentalDuration=true` but has not been paid-tested yet.
 
-Not yet verified: real I2VA / FL2VA renders (request shape mirrors the Toonflow provider; T2VA and Ref2VA are proven).
+Not yet verified: real I2VA / FL2VA renders (request shape mirrors the Toonflow provider; T2VA and Ref2VA are proven), and H3's direct 2/3s tier (the local 4s+trim fallback is verified with a mocked provider).
 
 ## Limitations
 
@@ -222,6 +223,7 @@ Not yet verified: real I2VA / FL2VA renders (request shape mirrors the Toonflow 
 - Annotation is serial: ~10–20 minutes for 40 shots. Failures resume from the last completed shot.
 - Skills are retrieved lexically, not by embedding.
 - Basic assembly is implemented (hard cut / crossfade), but subtitles, complex transitions, audio mixing and multi-track editing are not.
+- H3's shorter 2/3s tiers are experimental; the safe default is 4s generation plus local trim.
 - The image provider is text-to-image only; no image editing or reference-image conditioning.
 - Applying a style pack copies only referenced images and clips, not the source project's shot plan.
 - Chat Markdown is a small subset: no math, footnotes or raw HTML; raw HTML is shown as text.

@@ -495,7 +495,7 @@ function renderPlan(project) {
             ${shot.video ? `<button class="videoPoster mini" type="button" data-media-src="${videoUrl}" data-media-type="video" data-media-title="${escapeHtml(`${shot.id} ${shot.title}`)}" data-media-open="${videoUrl}" aria-label="弹窗预览 ${escapeHtml(shot.id)}"><video muted preload="metadata" playsinline ${posterUrl ? `poster="${posterUrl}"` : ""} src="${videoUrl}"></video><span class="playBadge"><span>▶</span></span></button>` : `<div class="planPlaceholder mini">${shot.status === "generating" ? "生成中…" : "未生成"}</div>`}
           </div>
           <div class="planInfo">
-            <div class="planHead"><b>${escapeHtml(shot.id)}</b><span class="muted">${formatSeconds(shot.durationSeconds)}</span><span class="state ${escapeHtml(shot.status)}">${escapeHtml(shotStatusLabel(shot.status))}</span></div>
+            <div class="planHead"><b>${escapeHtml(shot.id)}</b><span class="muted">${formatSeconds(shot.durationSeconds)}</span>${shot.durationSeconds < 4 ? `<span class="shortBadge" title="低于 H3 常规下限 4 秒；默认 4 秒生成后裁剪">短镜头</span>` : ""}<span class="state ${escapeHtml(shot.status)}">${escapeHtml(shotStatusLabel(shot.status))}</span></div>
             <p class="planAction"><b>${escapeHtml(shot.title)}</b></p>
             ${shot.action ? `<details class="fold planDetails"><summary>镜头描述</summary><p>${escapeHtml(shot.action)}</p></details>` : ""}
             ${shot.error ? `<p class="inlineWarning error">${escapeHtml(shot.error)}</p>` : ""}

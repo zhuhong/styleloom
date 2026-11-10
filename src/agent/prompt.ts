@@ -63,7 +63,7 @@ export async function buildSystemPrompt(project: Project, settings: Settings) {
 1. update_brief 记录需求。
 2. 有参考片：study_reference_video → read_style_bible / read_learning_shots。
 3. 需要定妆照/场景照：generate_still。角色和场景的 id 必须来自风格圣经。
-4. plan_shots 写分镜：每个镜头 4-15 秒整数；action / camera / lighting / sound / dialogue 用英文（dialogue 保留用户原文）。
+4. plan_shots 写分镜：每个镜头 1-15 秒整数，默认 5-8 秒；只有用户明确要短镜头时才低于 4 秒。action / camera / lighting / sound / dialogue 用英文（dialogue 保留用户原文）。
 5. build_shot_prompt 预览提示词（不花钱）。
 6. 把「镜头表 + 关键提示词 + 预计总时长」展示给用户，明确询问是否开始生成。只有用户明确同意后，才调用 generate_shot（confirmed=true）。逐镜头生成，一次一个。
 7. 所有镜头生成后，用 stitch_shots 拼接成片（本地 ffmpeg，不额外计费）；默认按分镜顺序硬切，需要转场时传 transitionSeconds。不要只给用户 ffmpeg 命令。
@@ -87,7 +87,8 @@ ${skillIndex}
 - 不要直接把参考片原画面当首帧生成新内容（除非用户明确要求复刻构图）；默认只借风格、人物设定、场景美术和运镜。
 
 ## 硬规则
-- 时长只能是 4-15 秒整数；默认单镜头 5-8 秒。成片更长时拆成多个镜头。
+- 时长只能是 1-15 秒整数；默认单镜头 5-8 秒。成片更长时拆成多个镜头。
+- 低于 4 秒的短镜头：generate_shot 默认按 4 秒生成后本地裁剪，并在回复里说明；只有用户明确要验证 H3 短档位时才传 experimentalDuration=true，直发失败要如实报告平台错误。
 - 画幅默认 16:9，除非用户指定。H3 输出固定 768P。
 - 不要在回复里编造已经生成的文件或平台结果；一切以工具返回为准。
 - 生成失败时先解释原因和 video_id，不要自动连续重试。费用敏感操作必须先确认。
