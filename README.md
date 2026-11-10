@@ -207,6 +207,7 @@ Verified end to end:
 - Agent tool chain through LiteLLM: `read_learning_shots → update_brief → plan_shots → build_shot_prompt` produced a valid 6309-character Ref2VA prompt.
 - Xiaohongshu download with a real note (9.45s, 720×1280, with audio), including short-link/URL/share-text parsing and failure branches.
 - Server, SSE, settings API, project file access, skills API, front-end rendering.
+- Front-end media lightbox: keyframes, stills, skill evidence and generated videos open in an in-page dialog (image / video / audio) with backdrop and ESC close; no new tab.
 - One real billed H3 T2VA render: 9s, 9:16, 768×1344, with audio, ~141s queue+inference; a VLM three-frame check rated it "highly consistent" with minor camera drift and a slight finger/frame fusion.
 - One real billed H3 Ref2VA render from a character still + an empty location still: 9s, 9:16, 768×1344, with audio, ~248s; the VLM check rated identity, room and framing "highly consistent", with no crop or drift and only minor hand/switch-panel artifacts.
 - A second reference (120s Xiaohongshu climbing video, 16 shots): 8 skills extracted; a 9s Ref2VA climbing shot rendered in ~248s and rated "highly consistent" for action, identity and gym layout; five camera/lighting/color skills moved to `active` (0.80).

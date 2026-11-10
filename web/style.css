@@ -129,7 +129,7 @@ code { background: #1f2733; padding: 1px 5px; border-radius: 5px; font-size: 12p
 .entityHead b { font-weight: 500; }
 .entityHead span { color: var(--muted); }
 .entity p { margin: 5px 0 0; font-size: 12px; color: #b9c2cf; }
-.thumbs { display: flex; gap: 6px; margin-top: 7px; }
+.thumbs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
 .thumbs img { width: 58px; height: 40px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); }
 
 .planRow { border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; margin-bottom: 8px; background: var(--panel); }
@@ -147,6 +147,56 @@ code { background: #1f2733; padding: 1px 5px; border-radius: 5px; font-size: 12p
 .assetList { display: flex; flex-direction: column; gap: 5px; font-size: 11px; }
 .assetList a { color: #9bd8c5; text-decoration: none; word-break: break-all; }
 .assetList a:hover { text-decoration: underline; }
+
+.mediaThumb { display: block; width: 58px; height: 40px; border-radius: 6px; overflow: hidden; border: 1px solid var(--line); background: #0a0c10; cursor: zoom-in; }
+.mediaThumb img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.18s ease; }
+.mediaThumb:hover { border-color: #3a6b5c; }
+.mediaThumb:hover img { transform: scale(1.06); }
+.shotCard .mediaThumb { width: 100%; height: auto; border: 0; border-radius: 0; }
+.shotCard .mediaThumb img { width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; }
+
+.planMedia { margin-top: 8px; }
+.videoPoster { position: relative; display: block; width: 100%; padding: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #000; cursor: zoom-in; }
+.videoPoster video { width: 100%; display: block; pointer-events: none; }
+.videoPoster .playBadge { position: absolute; inset: 0; display: grid; place-items: center; background: linear-gradient(180deg, rgba(0,0,0,0.05), rgba(0,0,0,0.45)); transition: background 0.2s; }
+.videoPoster .playBadge span { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 999px; background: rgba(8,10,14,0.62); border: 1px solid rgba(255,255,255,0.22); color: #fff; font-size: 12px; backdrop-filter: blur(8px); }
+.videoPoster:hover { border-color: #3a6b5c; }
+.videoPoster:hover .playBadge { background: linear-gradient(180deg, rgba(0,0,0,0.1), rgba(0,0,0,0.6)); }
+
+.assetGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding-right: 4px; }
+.assetCard { display: flex; flex-direction: column; gap: 5px; min-width: 0; padding: 6px; text-align: left; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); color: var(--text); cursor: zoom-in; }
+.assetCard:hover { border-color: #3a6b5c; transform: translateY(-1px); box-shadow: 0 4px 14px rgba(0,0,0,0.28); }
+.assetThumb { position: relative; display: block; aspect-ratio: 4 / 5; overflow: hidden; border-radius: 6px; background: #0a0c10; }
+.assetThumb img { width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none; }
+.assetThumb video { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+.assetThumb .assetPlay { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; font-size: 0; background: rgba(0,0,0,0.12); }
+.assetThumb .assetPlay::before { content: "▶"; display: grid; place-items: center; width: 32px; height: 32px; padding-left: 2px; border-radius: 50%; background: rgba(8,10,14,0.72); border: 1px solid rgba(255,255,255,0.55); color: #fff; font-size: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.55); }
+.assetThumb .assetAudio { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 18px; }
+.assetLabel { min-width: 0; font-size: 11px; color: #b9c2d0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.assetLabel b { display: inline-block; margin-right: 5px; padding: 0 4px; border: 1px solid #2f5c4d; border-radius: 999px; color: var(--accent); font-size: 9px; font-weight: 500; line-height: 1.5; text-transform: uppercase; letter-spacing: 0.3px; }
+.assetPlain { font-size: 11px; color: #9bd8c5; word-break: break-all; }
+
+.mediaDialog { width: min(1120px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 0; border: 1px solid #2b3442; border-radius: 14px; background: #07090c; color: var(--text); overflow: hidden; }
+.mediaDialog::backdrop { background: rgba(0,0,0,0.82); backdrop-filter: blur(8px); }
+.mediaDialog[open] { animation: mediaIn 0.18s ease-out; }
+@keyframes mediaIn { from { opacity: 0; transform: scale(0.985); } to { opacity: 1; transform: scale(1); } }
+.mediaDialogBar { display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 16px; border-bottom: 1px solid var(--line); background: rgba(18,22,28,0.9); }
+.mediaDialogTitle { flex: 1; min-width: 0; font-size: 13px; color: #c7cfdb; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mediaDialogActions { display: flex; align-items: center; gap: 12px; }
+.mediaDialogActions .ghost { color: var(--muted); font-size: 11px; text-decoration: none; padding: 5px 8px; border: 1px solid var(--line); border-radius: 7px; }
+.mediaDialogActions .ghost:hover { color: var(--accent); border-color: #3a6b5c; }
+.mediaDialogActions .iconButton { width: 40px; height: 40px; font-size: 20px; line-height: 1; }
+.mediaDialogActions .iconButton:hover, .mediaDialogActions .iconButton:focus-visible { border-color: var(--accent); color: var(--accent); }
+.mediaDialogBody { display: grid; place-items: center; min-height: 200px; max-height: calc(100vh - 100px); overflow: auto; background: #050608; padding: 14px 16px 16px; }
+.mediaDialogBody img { display: block; max-width: 100%; max-height: calc(100vh - 150px); object-fit: contain; border-radius: 8px; }
+.mediaDialogBody video { display: block; width: auto; max-width: 100%; max-height: calc(100vh - 150px); background: #000; border-radius: 8px; }
+.mediaDialogBody audio { width: min(640px, 90%); margin: 40px 0; }
+.mediaDialogBody img[hidden], .mediaDialogBody video[hidden], .mediaDialogBody audio[hidden] { display: none; }
+
+@media (max-width: 760px) {
+  .mediaDialog { width: calc(100vw - 16px); max-height: calc(100vh - 16px); }
+  .mediaDialogBody img, .mediaDialogBody video { max-height: calc(100vh - 92px); }
+}
 
 .settingsDialog { width: min(640px, calc(100vw - 40px)); border: 1px solid var(--line); border-radius: 16px; background: var(--panel); color: var(--text); padding: 22px; }
 .settingsDialog::backdrop { background: rgba(0, 0, 0, 0.6); }

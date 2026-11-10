@@ -53,6 +53,21 @@
       </aside>
     </main>
 
+    <dialog id="mediaDialog" class="mediaDialog">
+      <div class="mediaDialogBar">
+        <div id="mediaDialogTitle" class="mediaDialogTitle"></div>
+        <div class="mediaDialogActions">
+          <a id="mediaDialogOpen" class="ghost" target="_blank" rel="noreferrer">原文件 ↗</a>
+          <button id="mediaDialogClose" class="iconButton" type="button" aria-label="关闭">×</button>
+        </div>
+      </div>
+      <div class="mediaDialogBody">
+        <img id="mediaDialogImage" alt="" />
+        <video id="mediaDialogVideo" controls playsinline></video>
+        <audio id="mediaDialogAudio" controls></audio>
+      </div>
+    </dialog>
+
     <dialog id="settingsDialog" class="settingsDialog">
       <form method="dialog" id="settingsForm">
         <h2>设置</h2>

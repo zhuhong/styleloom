@@ -22,6 +22,13 @@ const els = {
   settingsButton: document.getElementById("settingsButton"),
   settingsDialog: document.getElementById("settingsDialog"),
   settingsForm: document.getElementById("settingsForm"),
+  mediaDialog: document.getElementById("mediaDialog"),
+  mediaDialogTitle: document.getElementById("mediaDialogTitle"),
+  mediaDialogOpen: document.getElementById("mediaDialogOpen"),
+  mediaDialogClose: document.getElementById("mediaDialogClose"),
+  mediaDialogImage: document.getElementById("mediaDialogImage"),
+  mediaDialogVideo: document.getElementById("mediaDialogVideo"),
+  mediaDialogAudio: document.getElementById("mediaDialogAudio"),
   engineState: document.getElementById("engineState"),
 };
 
@@ -59,9 +66,85 @@ function fileUrl(projectId, path) {
   return `/files/${encodeURIComponent(projectId)}/${path.split("/").map(encodeURIComponent).join("/")}`;
 }
 
+function skillFileUrl(skillId, path) {
+  if (!skillId || !path) return "";
+  return `/skill-files/${encodeURIComponent(skillId)}/${path.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+function mediaTypeForPath(path) {
+  const extension = String(path ?? "").split("?")[0].split(".").pop()?.toLowerCase() ?? "";
+  if (["mp4", "webm", "mov", "m4v", "ogv"].includes(extension)) return "video";
+  if (["mp3", "m4a", "wav", "aac", "ogg", "flac"].includes(extension)) return "audio";
+  if (["jpg", "jpeg", "png", "webp", "gif", "avif", "bmp", "svg"].includes(extension)) return "image";
+  return null;
+}
+
 function formatSeconds(value) {
   const number = Number(value ?? 0);
   return `${number.toFixed(number % 1 === 0 ? 0 : 2)}s`;
+}
+
+function resetMediaDialog() {
+  const video = els.mediaDialogVideo;
+  const audio = els.mediaDialogAudio;
+  const image = els.mediaDialogImage;
+  video.pause();
+  video.removeAttribute("src");
+  video.removeAttribute("poster");
+  video.load();
+  video.hidden = true;
+  audio.pause();
+  audio.removeAttribute("src");
+  audio.load();
+  audio.hidden = true;
+  image.removeAttribute("src");
+  image.alt = "";
+  image.hidden = true;
+  image.onload = null;
+  video.onloadedmetadata = null;
+  els.mediaDialog.style.width = "";
+}
+
+function sizeMediaDialog(width, height) {
+  if (!width || !height) return;
+  els.mediaDialog.style.width = height > width
+    ? "min(420px, calc(100vw - 32px))"
+    : "min(1120px, calc(100vw - 32px))";
+}
+
+function openMedia({ src, type, title, openUrl }) {
+  if (!src) return;
+  delete els.mediaDialog.dataset.closing;
+  resetMediaDialog();
+  const kind = type || mediaTypeForPath(src) || "image";
+  const kindLabel = kind === "video" ? "视频" : kind === "audio" ? "音频" : "图片";
+  const cleanTitle = String(title || "").replace(/^(frame|video|still|source|clip|audio)\s*·\s*/i, "");
+  els.mediaDialogTitle.textContent = cleanTitle ? `${kindLabel} · ${cleanTitle}` : kindLabel;
+  els.mediaDialogOpen.href = openUrl || src;
+  if (kind === "video") {
+    els.mediaDialogVideo.onloadedmetadata = () => sizeMediaDialog(els.mediaDialogVideo.videoWidth, els.mediaDialogVideo.videoHeight);
+    els.mediaDialogVideo.src = src;
+    els.mediaDialogVideo.hidden = false;
+    els.mediaDialogVideo.play().catch(() => {});
+  } else if (kind === "audio") {
+    els.mediaDialog.style.width = "min(560px, calc(100vw - 32px))";
+    els.mediaDialogAudio.src = src;
+    els.mediaDialogAudio.hidden = false;
+    els.mediaDialogAudio.play().catch(() => {});
+  } else {
+    els.mediaDialogImage.onload = () => sizeMediaDialog(els.mediaDialogImage.naturalWidth, els.mediaDialogImage.naturalHeight);
+    els.mediaDialogImage.src = src;
+    els.mediaDialogImage.alt = title || "";
+    els.mediaDialogImage.hidden = false;
+  }
+  if (!els.mediaDialog.open) els.mediaDialog.showModal();
+}
+
+function closeMedia() {
+  if (!els.mediaDialog.open) return;
+  els.mediaDialog.dataset.closing = "1";
+  els.mediaDialog.close();
+  resetMediaDialog();
 }
 
 async function api(path, options = {}) {
@@ -198,7 +281,10 @@ function renderSkills() {
       ${(skill.applicableWhen || []).length ? `<div class="chips">${skill.applicableWhen.map(item => `<span class="chip">${escapeHtml(item)}</span>`).join("")}</div>` : ""}
       ${skill.instruction ? `<p class="skillInstruction">${escapeHtml(skill.instruction)}</p>` : ""}
       ${skill.promptFragment ? `<pre>${escapeHtml(skill.promptFragment)}</pre>` : ""}
-      ${(skill.images || []).length ? `<div class="thumbs">${skill.images.map(image => `<a href="/skill-files/${encodeURIComponent(skill.id)}/${image.split("/").map(encodeURIComponent).join("/")}" target="_blank" rel="noreferrer"><img src="/skill-files/${encodeURIComponent(skill.id)}/${image.split("/").map(encodeURIComponent).join("/")}" alt="${escapeHtml(skill.name)}" /></a>`).join("")}</div>` : ""}
+      ${(skill.images || []).length ? `<div class="thumbs">${skill.images.map(image => {
+        const src = skillFileUrl(skill.id, image);
+        return `<a class="mediaThumb" href="${src}" data-media-src="${src}" data-media-type="image" data-media-title="${escapeHtml(skill.name)} · 证据" target="_blank" rel="noreferrer"><img loading="lazy" src="${src}" alt="${escapeHtml(skill.name)}" /></a>`;
+      }).join("")}</div>` : ""}
       <p class="skillStats">${escapeHtml(skill.status)} · 证据 ${skill.evidenceCount} · 使用 ${skill.used} · 好评 ${skill.good} / 一般 ${skill.mixed} / 差评 ${skill.bad}</p>
     </details>`).join("")}
   </div>`;
@@ -233,7 +319,7 @@ function renderInspector(project = state.project, shots = state.shots) {
     ${learning.shotCount ? `<p class="muted" style="font-size:12px">${learning.shotCount} 个镜头 · ${formatSeconds(learning.sourceDuration)} · ${learning.sourceWidth}×${learning.sourceHeight}</p>` : ""}
     ${shots.length ? `<div class="shotGrid" style="margin-top:10px">${shots.map(shot => `
       <div class="shotCard">
-        <a href="${fileUrl(project.id, shot.keyframe)}" target="_blank" rel="noreferrer"><img loading="lazy" src="${fileUrl(project.id, shot.keyframe)}" alt="${escapeHtml(shot.id)}" /></a>
+        <a class="mediaThumb" href="${fileUrl(project.id, shot.keyframe)}" data-media-src="${fileUrl(project.id, shot.keyframe)}" data-media-type="image" data-media-title="${escapeHtml(shot.id)} 关键帧" target="_blank" rel="noreferrer"><img loading="lazy" src="${fileUrl(project.id, shot.keyframe)}" alt="${escapeHtml(shot.id)}" /></a>
         <div class="shotMeta"><strong>${escapeHtml(shot.id)} · ${formatSeconds(shot.duration)}</strong>${escapeHtml(shot.shotSize || "-")} · ${escapeHtml((shot.movement || "").slice(0, 42))}</div>
       </div>`).join("")}</div>` : ""}
   </div>`);
@@ -249,14 +335,14 @@ function renderInspector(project = state.project, shots = state.shots) {
         ${(bible.characters || []).map(character => `<div class="entity">
           <div class="entityHead"><b>${escapeHtml(character.name)}</b><span>${escapeHtml(character.id)}</span></div>
           <p>${escapeHtml(character.descriptionZh)}</p>
-          ${(character.stillImages || []).length ? `<div class="thumbs">${character.stillImages.slice(0, 3).map(path => `<a href="${fileUrl(project.id, path)}" target="_blank" rel="noreferrer"><img src="${fileUrl(project.id, path)}" alt="${escapeHtml(character.name)}" /></a>`).join("")}</div>` : ""}
+          ${(character.stillImages || []).length ? `<div class="thumbs">${character.stillImages.slice(0, 3).map(path => `<a class="mediaThumb" href="${fileUrl(project.id, path)}" data-media-src="${fileUrl(project.id, path)}" data-media-type="image" data-media-title="${escapeHtml(character.name)} · 定妆照" target="_blank" rel="noreferrer"><img src="${fileUrl(project.id, path)}" alt="${escapeHtml(character.name)}" /></a>`).join("")}</div>` : ""}
         </div>`).join("")}
       </div>
       <div>
         ${(bible.locations || []).map(location => `<div class="entity">
           <div class="entityHead"><b>${escapeHtml(location.name)}</b><span>${escapeHtml(location.id)}</span></div>
           <p>${escapeHtml(location.descriptionZh)}</p>
-          ${(location.stillImages || []).length ? `<div class="thumbs">${location.stillImages.slice(0, 3).map(path => `<a href="${fileUrl(project.id, path)}" target="_blank" rel="noreferrer"><img src="${fileUrl(project.id, path)}" alt="${escapeHtml(location.name)}" /></a>`).join("")}</div>` : ""}
+          ${(location.stillImages || []).length ? `<div class="thumbs">${location.stillImages.slice(0, 3).map(path => `<a class="mediaThumb" href="${fileUrl(project.id, path)}" data-media-src="${fileUrl(project.id, path)}" data-media-type="image" data-media-title="${escapeHtml(location.name)} · 场景照" target="_blank" rel="noreferrer"><img src="${fileUrl(project.id, path)}" alt="${escapeHtml(location.name)}" /></a>`).join("")}</div>` : ""}
         </div>`).join("")}
       </div>
       <div class="chips">${(bible.cameraGrammar || []).map(move => `<span class="chip">${escapeHtml(move.name)}</span>`).join("")}</div>
@@ -266,13 +352,20 @@ function renderInspector(project = state.project, shots = state.shots) {
   if ((project.plan || []).length) {
     sections.push(`<div class="inspectorSection">
       <h3>分镜 <span class="count">${project.plan.length}</span></h3>
-      ${project.plan.map(shot => `<div class="planRow">
+      ${project.plan.map(shot => {
+        const videoUrl = shot.video ? fileUrl(project.id, shot.video) : "";
+        const preview = shot.video
+          ? (project.assets || []).find(asset => asset.kind === "frame" && asset.meta?.shotId === shot.id && (asset.label.includes("预览") || asset.path.includes("preview")))
+          : undefined;
+        const posterUrl = preview ? fileUrl(project.id, preview.path) : "";
+        return `<div class="planRow">
         <div class="planHead"><b>${escapeHtml(shot.id)}</b><span class="muted">${formatSeconds(shot.durationSeconds)}</span><span class="state ${escapeHtml(shot.status)}">${escapeHtml(shot.status)}</span></div>
         <p class="planAction">${escapeHtml(shot.title)} — ${escapeHtml(shot.action)}</p>
-        ${shot.video ? `<video controls preload="metadata" src="${fileUrl(project.id, shot.video)}"></video>` : ""}
+        ${shot.video ? `<div class="planMedia"><button class="videoPoster" type="button" data-media-src="${videoUrl}" data-media-type="video" data-media-title="${escapeHtml(`${shot.id} ${shot.title}`)}" data-media-open="${videoUrl}" aria-label="弹窗预览 ${escapeHtml(shot.id)}"><video muted preload="metadata" playsinline ${posterUrl ? `poster="${posterUrl}"` : ""} src="${videoUrl}"></video><span class="playBadge"><span>▶ 弹窗预览</span></span></button></div>` : ""}
         ${shot.error ? `<p style="font-size:11px;color:#fca5a5">${escapeHtml(shot.error)}</p>` : ""}
         ${shot.prompt ? `<details><summary>H3 提示词 · ${escapeHtml(shot.promptMode || "")}</summary><pre>${escapeHtml(shot.prompt)}</pre></details>` : ""}
-      </div>`).join("")}
+      </div>`;
+      }).join("")}
     </div>`);
   }
 
@@ -281,8 +374,19 @@ function renderInspector(project = state.project, shots = state.shots) {
   if ((project.assets || []).length) {
     sections.push(`<div class="inspectorSection">
       <h3>素材 <span class="count">${project.assets.length}</span></h3>
-      <div class="assetList">
-        ${project.assets.slice(-16).reverse().map(asset => `<a href="${fileUrl(project.id, asset.path)}" target="_blank" rel="noreferrer">${escapeHtml(asset.kind)} · ${escapeHtml(asset.label)}</a>`).join("")}
+      <div class="assetGrid">
+        ${project.assets.slice(-16).reverse().map(asset => {
+          const src = fileUrl(project.id, asset.path);
+          const type = mediaTypeForPath(asset.path);
+          const title = `${asset.kind} · ${asset.label}`;
+          if (!type) return `<a class="assetPlain" href="${src}" target="_blank" rel="noreferrer">${escapeHtml(title)}</a>`;
+          const thumb = type === "image"
+            ? `<img loading="lazy" src="${src}" alt="" />`
+            : type === "video"
+              ? `<video muted preload="metadata" playsinline src="${src}"></video><span class="assetPlay">▶</span>`
+              : `<span class="assetAudio">♪</span>`;
+          return `<button class="assetCard" type="button" title="${escapeHtml(title)}" data-media-src="${src}" data-media-type="${type}" data-media-title="${escapeHtml(title)}" data-media-open="${src}"><span class="assetThumb">${thumb}</span><span class="assetLabel"><b>${escapeHtml(asset.kind)}</b>${escapeHtml(asset.label)}</span></button>`;
+        }).join("")}
       </div>
     </div>`);
   }
@@ -326,6 +430,7 @@ function scheduleRefresh() {
 }
 
 async function selectProject(id) {
+  closeMedia();
   try {
     const data = await api(`/api/projects/${encodeURIComponent(id)}`);
     state.project = data.project;
@@ -486,6 +591,34 @@ els.settingsButton.addEventListener("click", async () => {
     input.value = value == null ? "" : String(value);
   }
   els.settingsDialog.showModal();
+});
+
+els.mediaDialog.addEventListener("cancel", () => {
+  els.mediaDialog.dataset.closing = "1";
+  resetMediaDialog();
+});
+els.mediaDialog.addEventListener("close", () => {
+  if (els.mediaDialog.dataset.closing === "1") {
+    delete els.mediaDialog.dataset.closing;
+    resetMediaDialog();
+  }
+});
+els.mediaDialog.addEventListener("click", event => {
+  if (event.target === els.mediaDialog) closeMedia();
+});
+els.mediaDialogClose.addEventListener("click", closeMedia);
+els.inspector.addEventListener("click", event => {
+  if (!(event.target instanceof Element)) return;
+  const trigger = event.target.closest("[data-media-src]");
+  if (!trigger || !els.inspector.contains(trigger)) return;
+  event.preventDefault();
+  const src = trigger.dataset.mediaSrc;
+  openMedia({
+    src,
+    type: trigger.dataset.mediaType || mediaTypeForPath(src) || "image",
+    title: trigger.dataset.mediaTitle || "",
+    openUrl: trigger.dataset.mediaOpen || trigger.getAttribute("href") || src,
+  });
 });
 
 els.settingsForm.addEventListener("submit", async event => {
