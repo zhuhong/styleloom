@@ -234,7 +234,7 @@ export type ProjectSummary = {
 export type AgentEvent =
   | { type: "message"; role: "user" | "assistant"; content: string }
   | { type: "tool_start"; id: string; name: string; args: unknown }
-  | { type: "tool_end"; id: string; name: string; ok: boolean; preview: string }
+  | { type: "tool_end"; id: string; name: string; ok: boolean; preview: string; elapsedMs: number }
   | { type: "progress"; scope: string; percent: number; label: string }
   | { type: "state"; project: Project }
   | { type: "error"; message: string }

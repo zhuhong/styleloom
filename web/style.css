@@ -88,8 +88,10 @@ code { background: #1f2733; padding: 1px 5px; border-radius: 5px; font-size: 12p
 
 .toolCard { align-self: flex-start; width: min(100%, 560px); background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 12px; }
 .toolHead { display: flex; align-items: center; gap: 8px; color: var(--muted); }
-.toolHead .toolName { color: var(--text); font-weight: 500; }
-.toolHead .status { margin-left: auto; font-size: 11px; }
+.toolHead .toolName { min-width: 0; overflow: hidden; color: var(--text); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.toolHead .muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toolHead .status { flex: none; margin-left: auto; font-size: 11px; }
+.toolDuration { flex: none; margin-left: 6px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .toolHead .status.ok { color: var(--accent); }
 .toolHead .status.fail { color: var(--danger); }
 .toolArgs { margin-top: 6px; color: #6b7686; word-break: break-all; max-height: 60px; overflow: hidden; }

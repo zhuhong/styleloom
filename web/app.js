@@ -94,6 +94,19 @@ function formatUpdatedAt(value) {
   return date.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
+function formatDuration(ms) {
+  const total = Math.max(0, Number(ms) || 0);
+  if (total < 1) return "<1ms";
+  if (total < 1000) return `${Math.round(total)}ms`;
+  const seconds = total / 1000;
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = Math.round(seconds % 60);
+  if (minutes < 60) return `${minutes}m ${String(rest).padStart(2, "0")}s`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${String(minutes % 60).padStart(2, "0")}m`;
+}
+
 function skillStatusLabel(status) {
   return status === "active" ? "生效" : status === "candidate" ? "候选" : status === "deprecated" ? "停用" : status;
 }
@@ -222,10 +235,12 @@ function addToolCard(event) {
       <span class="toolName">${escapeHtml(toolLabels[event.name] || event.name)}</span>
       <span class="muted">${escapeHtml(event.name)}</span>
       <span class="status">运行中…</span>
+      <span class="toolDuration"></span>
     </div>
     <div class="toolArgs">${escapeHtml(JSON.stringify(event.args ?? {}).slice(0, 400))}</div>
     <div class="progress"><i></i></div>
     <div class="progressLabel">准备中</div>`;
+  card.dataset.startedAt = String(performance.now());
   els.messages.append(card);
   state.toolCards.set(event.id, card);
   scrollToBottom();
@@ -253,6 +268,14 @@ function finishToolCard(event) {
   if (bar && event.ok) bar.style.width = "100%";
   const label = card.querySelector(".progressLabel");
   if (label) label.textContent = event.preview.slice(0, 300);
+  const startedAt = Number(card.dataset.startedAt);
+  const fallback = Number.isFinite(startedAt) ? performance.now() - startedAt : 0;
+  const elapsed = Number.isFinite(Number(event.elapsedMs)) ? Number(event.elapsedMs) : fallback;
+  const duration = card.querySelector(".toolDuration");
+  if (duration) {
+    duration.textContent = `耗时 ${formatDuration(elapsed)}`;
+    duration.title = "工具执行耗时";
+  }
   scrollToBottom();
 }
 

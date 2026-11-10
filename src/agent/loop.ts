@@ -89,6 +89,7 @@ export async function runAgentTurn(
           parsedArgs = call.function.arguments;
         }
         emit({ type: "tool_start", id: callId, name: call.function.name, args: parsedArgs });
+        const startedAt = Date.now();
         let payload: unknown;
         let ok = true;
         // 进度事件统一绑定到当前 tool call，前端按 callId 更新卡片。
@@ -104,7 +105,7 @@ export async function runAgentTurn(
           payload = { ok: false, error: error instanceof Error ? error.message : String(error) };
         }
         const serialized = JSON.stringify(payload);
-        emit({ type: "tool_end", id: callId, name: call.function.name, ok, preview: serialized.slice(0, 800) });
+        emit({ type: "tool_end", id: callId, name: call.function.name, ok, preview: serialized.slice(0, 800), elapsedMs: Date.now() - startedAt });
         messages.push({
           role: "tool",
           tool_call_id: callId,
