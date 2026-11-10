@@ -86,6 +86,52 @@ code { background: #1f2733; padding: 1px 5px; border-radius: 5px; font-size: 12p
 .bubble.assistant { align-self: flex-start; background: var(--panel); border: 1px solid var(--line); }
 .bubble.error { align-self: flex-start; background: #2a1717; border: 1px solid #5b2626; color: #fecaca; }
 
+/* 助手消息的 Markdown 排版 */
+.bubble.assistant.markdown { white-space: normal; overflow-wrap: anywhere; }
+.bubble.assistant.markdown > :first-child { margin-top: 0; }
+.bubble.assistant.markdown > :last-child { margin-bottom: 0; }
+.bubble.assistant.markdown p { margin: 0 0 8px; }
+.bubble.assistant.markdown h1,
+.bubble.assistant.markdown h2,
+.bubble.assistant.markdown h3,
+.bubble.assistant.markdown h4,
+.bubble.assistant.markdown h5,
+.bubble.assistant.markdown h6 { margin: 12px 0 6px; line-height: 1.35; color: #e6edf3; font-weight: 600; }
+.bubble.assistant.markdown h1 { font-size: 19px; }
+.bubble.assistant.markdown h2 { font-size: 17px; }
+.bubble.assistant.markdown h3 { font-size: 15px; }
+.bubble.assistant.markdown h4,
+.bubble.assistant.markdown h5,
+.bubble.assistant.markdown h6 { font-size: 14px; }
+.bubble.assistant.markdown h1,
+.bubble.assistant.markdown h2 { padding-bottom: 4px; border-bottom: 1px solid var(--line); }
+.bubble.assistant.markdown ul,
+.bubble.assistant.markdown ol { margin: 6px 0 9px; padding-left: 21px; }
+.bubble.assistant.markdown li { margin: 2px 0; }
+.bubble.assistant.markdown li::marker { color: var(--accent); }
+.bubble.assistant.markdown li > ul,
+.bubble.assistant.markdown li > ol { margin: 3px 0; }
+.bubble.assistant.markdown blockquote { margin: 8px 0; padding: 6px 10px; border-left: 3px solid #3a6b5c; border-radius: 0 6px 6px 0; background: rgba(52, 211, 153, 0.06); color: #b9c2cf; }
+.bubble.assistant.markdown blockquote p { margin: 0; }
+.bubble.assistant.markdown hr { margin: 12px 0; border: 0; border-top: 1px solid var(--line); }
+.bubble.assistant.markdown a { color: #7dd3fc; text-decoration: none; border-bottom: 1px solid rgba(125, 211, 252, 0.35); }
+.bubble.assistant.markdown a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+.bubble.assistant.markdown strong { color: #e6edf3; font-weight: 600; }
+.bubble.assistant.markdown del { opacity: 0.65; }
+.bubble.assistant.markdown .mdImage { display: block; max-width: 100%; max-height: 320px; margin: 8px 0; border-radius: 8px; object-fit: contain; }
+.bubble.assistant.markdown .mdCode { max-width: 100%; max-height: 360px; margin: 8px 0; padding: 10px 12px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: #0d1117; }
+.bubble.assistant.markdown .mdCode code { display: block; padding: 0; border-radius: 0; background: transparent; color: #d7e0ea; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.55; white-space: pre; }
+.bubble.assistant.markdown .mdInline { padding: 1px 5px; border-radius: 5px; background: #1f2733; color: #d7e0ea; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+.bubble.assistant.markdown .mdTableWrap { max-width: 100%; margin: 8px 0; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
+.bubble.assistant.markdown .mdTable { width: 100%; border-collapse: collapse; font-size: 12px; }
+.bubble.assistant.markdown .mdTable th,
+.bubble.assistant.markdown .mdTable td { padding: 6px 9px; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); text-align: left; vertical-align: top; }
+.bubble.assistant.markdown .mdTable th:last-child,
+.bubble.assistant.markdown .mdTable td:last-child { border-right: 0; }
+.bubble.assistant.markdown .mdTable tbody tr:last-child td { border-bottom: 0; }
+.bubble.assistant.markdown .mdTable th { background: var(--panel2); color: #c7cfdb; font-weight: 600; white-space: nowrap; }
+.bubble.assistant.markdown .mdTask { margin: 0 4px 0 0; vertical-align: -1px; accent-color: var(--accent); }
+
 .toolCard { align-self: flex-start; width: min(100%, 560px); background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 12px; }
 .toolHead { display: flex; align-items: center; gap: 8px; color: var(--muted); }
 .toolHead .toolName { min-width: 0; overflow: hidden; color: var(--text); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }

@@ -1,3 +1,5 @@
+import { renderMarkdown } from "./markdown.js";
+
 const state = {
   projects: [],
   packs: [],
@@ -221,7 +223,12 @@ function addBubble(role, content, isError = false) {
   clearEmptyState();
   const bubble = document.createElement("div");
   bubble.className = `bubble ${isError ? "error" : role}`;
-  bubble.textContent = content;
+  if (role === "assistant" && !isError) {
+    bubble.classList.add("markdown");
+    bubble.innerHTML = renderMarkdown(content);
+  } else {
+    bubble.textContent = content;
+  }
   els.messages.append(bubble);
   scrollToBottom();
 }
