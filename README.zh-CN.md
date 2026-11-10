@@ -36,11 +36,11 @@
 
 ## 示例
 
-一段 9.4 秒的竖屏参考片，学习一次后出片。原片属于第三方且含真人，**不随仓库分发**；下面展示的是模型从中学到的美术方向，以及据此生成的镜头。
+一段 9.4 秒的竖屏参考片，学习一次后生成两版。下面这版是**第二次生成**：把人物定妆照与空场景照作为 Ref2VA 参考图回灌。原片属于第三方且含真人，**不随仓库分发**；展示的是模型从中学到的美术方向，以及据此生成的镜头。
 
-| 学到的美术方向（AI 静帧） | 生成的镜头（AI） |
+| 学到的美术方向（AI 静帧） | 生成的镜头（AI，Ref2VA 版） |
 | :---: | :---: |
-| <img src="docs/assets/example-location.jpg" width="210" alt="从参考片归纳出的空场景 AI 静帧"> | <img src="docs/assets/example-generated-frame.jpg" width="210" alt="生成镜头截帧"> |
+| <img src="docs/assets/example-location.jpg" width="210" alt="从参考片归纳出的空场景 AI 静帧"> | <img src="docs/assets/example-generated-frame.jpg" width="210" alt="第二次（Ref2VA）生成镜头截帧"> |
 
 ![生成镜头预览](docs/assets/example-generated.gif)
 

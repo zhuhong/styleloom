@@ -37,11 +37,11 @@ reference video ──ffmpeg──▶ shots / keyframes / reference clips
 
 ## Example
 
-One 9.4-second vertical reference clip, studied once, then rendered. The source footage is third-party and features a real person, so it is **not** redistributed here — what follows is the art direction the models derived from it, and the shot they produced.
+One 9.4-second vertical reference clip, studied once, then rendered twice. The take below is the **second render**: the character and location stills were fed back as Ref2VA references. The source footage is third-party and features a real person, so it is **not** redistributed here — what follows is the art direction the models derived from it, and the shot they produced.
 
-| Learned art direction (AI still) | Generated shot (AI) |
+| Learned art direction (AI still) | Generated shot (AI, Ref2VA take) |
 | :---: | :---: |
-| <img src="docs/assets/example-location.jpg" width="210" alt="AI-generated empty set derived from the reference"> | <img src="docs/assets/example-generated-frame.jpg" width="210" alt="Generated shot"> |
+| <img src="docs/assets/example-location.jpg" width="210" alt="AI-generated empty set derived from the reference"> | <img src="docs/assets/example-generated-frame.jpg" width="210" alt="Frame from the second (Ref2VA) render"> |
 
 ![Generated shot preview](docs/assets/example-generated.gif)
 
