@@ -1,0 +1,44 @@
+name: Feature request
+description: Suggest a capability, provider, or workflow improvement
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check the roadmap in the README before filing — parallel annotation, vector skill search, film assembly and output QA are already planned.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you solving
+      description: Describe the workflow gap, not just the feature. What do you do today instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+      description: How should it work from the user's point of view?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: layer
+    attributes:
+      label: Which layer
+      options:
+        - Agent tools / prompt
+        - Learning pipeline
+        - Generation / prompt building
+        - Provider adapter (model, platform, download source)
+        - Web UI
+        - Docs
+    validations:
+      required: true
+
+  - type: textarea
+    id: cost
+    attributes:
+      label: Cost and safety impact
+      description: Does it call a billed model or platform? Should it require confirmation?

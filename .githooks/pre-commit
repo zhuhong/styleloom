@@ -3,12 +3,12 @@
 # 启用方式：git config core.hooksPath .githooks
 set -e
 
-# 1) 禁止提交真实设置文件（data/ 已忽略，这里防 -f 强加）
-blocked=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^(data/settings\.json|data/settings\.local\.json|\.env(\..*)?)$' || true)
+# 1) 禁止提交 data/ 与本地环境文件（data/ 已忽略，这里防 -f 强加）
+blocked=$(git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMR | grep -E '^(data/|\.env(\..*)?$)' || true)
 if [ -n "$blocked" ]; then
-  echo "✗ 拒绝提交：以下文件可能包含密钥" >&2
+  echo "✗ 拒绝提交：以下路径不应进入版本库（可能含密钥、真实项目数据）" >&2
   echo "$blocked" | sed 's/^/    /' >&2
-  echo "  如确需提交，请先确认内容已脱敏。" >&2
+  echo "  data/ 是本地运行数据：设置、参考片、生成的素材。" >&2
   exit 1
 fi
 

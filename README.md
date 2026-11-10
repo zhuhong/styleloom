@@ -1,179 +1,233 @@
-# VideoCopy
+# StyleLoom
 
-一个会用**参考片学习**的视频生成 Agent。
+**A video-generation agent that learns from reference footage — then shoots something new in that style.**
 
-和 Toonflow 一样，它通过对话把想法变成分镜、定妆照、场景照和视频；关键区别是：它先把用户给的参考视频**拆成镜头并逐帧拉片**，归纳出可复用的「风格圣经」——角色身份与服装、场景美术、运镜语法、节奏、灯光与调色，再用这些知识驱动 MiniMax H3 生成新视频。
+![License: MIT](https://img.shields.io/badge/license-MIT-blue)
+![Runtime: Bun](https://img.shields.io/badge/runtime-Bun%201.3%2B-black)
+![Runtime deps: 0](https://img.shields.io/badge/runtime%20deps-0-brightgreen)
+![Status: alpha](https://img.shields.io/badge/status-alpha-orange)
 
-每次学习还会把方法沉淀成**跨项目技能**（怎么运镜、怎么布光、怎么写提示词、怎么避坑），生成后的用户反馈会继续调整技能置信度。参考片可以直接是本地文件，也可以是小红书笔记链接。
+English · [简体中文](README.zh-CN.md)
+
+Most video generators start from a prompt and hope. StyleLoom starts from a reference video you already trust: it cuts the footage into shots, has a vision model annotate every shot frame by frame, distills that into a structured **style bible** (identity, wardrobe, art direction, camera grammar, rhythm, lighting, sound), and then drives MiniMax H3 to generate new shots from those constraints.
+
+Every study session also produces **portable skills** — "how to move the camera", "how to light a rainy street" — stored with evidence and scored only by independent evidence and real human feedback. Over time the agent accumulates craft, not just prompts.
 
 ```
-参考视频 ──ffmpeg──▶ 镜头切片/关键帧/参考片段
-                        │
-                        ▼
-                视觉模型逐镜头拉片（景别/角度/运镜/灯光/主体/场景/动作/声音）
-                        │
-                        ▼
-                语言模型归纳「风格圣经」+ 可复用风格包
-                        │
-                        ▼
-                抽取跨项目技能（证据/反馈/置信度持续累积）
-                        │
-         ┌──────────────┼───────────────┐
-         ▼              ▼               ▼
-     定妆照/场景照    分镜与 H3 提示词   参考片段（运镜/节奏）
-         └──────────────┴───────────────┘
-                        │
-                        ▼
-              icompify / MiniMax H3 生成视频
+reference video ──ffmpeg──▶ shots / keyframes / reference clips
+                              │
+                              ▼
+                   per-shot vision annotation
+                   (framing, angle, movement, lighting, subject, action, sound)
+                              │
+                              ▼
+                   LLM distills a "style bible" + reusable style pack
+                              │
+                              ▼
+                   extracts cross-project skills
+                   (evidence, feedback, confidence accumulate)
+                              │
+        ┌─────────────────────┼─────────────────────┐
+        ▼                     ▼                     ▼
+   stills / looks      shot plan + H3 prompt   reference clips
+        └─────────────────────┼─────────────────────┘
+                              ▼
+                   icompify / MiniMax H3 renders the video
 ```
 
-## 快速开始
+## Why another video agent
 
-环境：macOS / Linux、[Bun](https://bun.sh) 1.3+、本机 `ffmpeg` / `ffprobe`。
-小红书下载需要 `yt-dlp`（可选）：`brew install yt-dlp`。
+- **Structured beats similar.** A shot needs executable constraints — identity anchors, wardrobe, set layout, camera move amplitude and speed, light direction. Those go straight into an H3 prompt and stay readable by humans, so you can correct them.
+- **Skills need evidence, not vibes.** A skill's confidence comes only from independent project evidence and real feedback. The model never grades its own homework.
+- **Money boundaries are explicit.** Building a prompt is free. Rendering requires an explicit `confirmed=true` after you have seen the plan.
+
+## Quick start
+
+Requirements: macOS or Linux (Windows untested), [Bun](https://bun.sh) 1.3+, local `ffmpeg` and `ffprobe`. Xiaohongshu download additionally needs `yt-dlp` (`brew install yt-dlp`).
 
 ```bash
+git clone <repo-url> styleloom
+cd styleloom
 bun install
-mkdir -p data && cp settings.example.json data/settings.json   # data/ 已被 gitignore
-# 编辑 data/settings.json，至少填 LLM 与 icompify 的 Key
+mkdir -p data && cp settings.example.json data/settings.json
+# edit data/settings.json — at minimum an LLM endpoint and an icompify key
 bun start
-# 打开 http://127.0.0.1:8787
+# open http://127.0.0.1:8787
 ```
 
-也可以在终端里对话：
+Prefer the terminal? `bun run chat`.
 
-```bash
-bun run chat
-```
+Sanity check: `bun run typecheck`.
 
-### 配置
+### Configuration
 
-`data/settings.json`（或网页右上角「设置」）：
+Everything lives in `data/settings.json` (or the in-app **Settings** dialog). `data/` is git-ignored; keys are masked on read and preserved as `********` when the UI saves.
 
-| 字段 | 说明 |
+| Field | Purpose |
 | --- | --- |
-| `llm.baseUrl` / `apiKey` / `model` | OpenAI 兼容的文本模型。默认接本机 LiteLLM `http://localhost:4000/v1` |
-| `llm.visionModel` | 支持图片输入的模型。默认 `deepseek-v4.1-flash`（经 LiteLLM）；也可换 Gemini 等 |
-| `video.baseUrl` / `apiKey` | icompify 开放平台，默认 `https://api.icompify.com` |
-| `video.model` / `referenceModel` | `minimax-h3-fl2va`（文生/首尾帧）、`minimax-h3-ref2va`（参考图/参考视频） |
-| `image.*` | 可选。OpenAI 兼容 `/images/generations`，用于生成定妆照/场景照；不配置则回退为参考片关键帧 |
-| `xhs.*` | 小红书下载：`ytDlpPath`、`cookiesFromBrowser`（chrome/safari/留空）、`referer`、`userAgent`、超时 |
-| `ffmpeg.*` | 二进制路径，默认 `ffmpeg` / `ffprobe` |
-| `learning.*` | 切镜阈值、最短镜头、最多镜头数、每镜采样帧数、是否切出参考片段 |
+| `llm.baseUrl` / `apiKey` / `model` | Any OpenAI-compatible text endpoint (default: local LiteLLM at `http://localhost:4000/v1`) |
+| `llm.visionModel` | Model that accepts images (default `deepseek-v4.1-flash`); Gemini etc. work too |
+| `video.baseUrl` / `apiKey` | icompify open platform, default `https://api.icompify.com` |
+| `video.model` / `referenceModel` | `minimax-h3-fl2va` (text / first-last frame), `minimax-h3-ref2va` (reference image / video) |
+| `image.*` | Optional OpenAI-compatible `/images/generations` or OpenRouter `/images`, for stills. Leave empty to fall back to reference keyframes |
+| `xhs.*` | `ytDlpPath`, `cookiesFromBrowser` (chrome / safari / firefox / edge / empty), referer, UA, timeout |
+| `ffmpeg.*` | Binary paths, default `ffmpeg` / `ffprobe` |
+| `learning.*` | Scene threshold, minimum shot length, max shots, samples per shot, keep clips |
 
-示例输出：[风格圣经](docs/examples/style-bible-example.md) · [Ref2VA 提示词](docs/examples/ref2va-prompt-example.txt) · [技能](docs/examples/skill-example.md) · [真实生成案例](docs/examples/generated-shot-example.md)。
+## Using it
 
-专题文档：[技能库](docs/skills.md) · [小红书下载](docs/xhs-download.md) · [H3 提示词](docs/h3-prompting.md)。
+1. **Give it material** — a local video path, a Xiaohongshu note link (full URL with `xsec_token` recommended), or just an idea.
+   e.g. *"Study the camera work and lighting of `/path/reference.mp4`, then make an 8-second rainy street dialogue shot."*
+2. **The agent studies** — Xiaohongshu links are downloaded first (`download_xhs_video`), then `study_reference_video` slices, annotates, distills and extracts skills, streaming progress to the page.
+3. **Review the study** — the agent reports characters, locations, camera grammar and rhythm in plain language; ask for corrections and it will call `update_style_bible`.
+4. **Generate stills** — `generate_still` for character/location references (falls back to reference keyframes if no image model is configured, and says so).
+5. **Plan shots** — `plan_shots`, 4–15 second integers per shot; set `referenceShotIds` when a shot should inherit a reference camera move.
+6. **Preview the prompt** — `build_shot_prompt`, free. The mode (T2VA / I2VA / FL2VA / L2VA / Ref2VA) is chosen automatically from available material.
+7. **Render** — `generate_shot(confirmed=true)` only after you have seen and approved the plan.
+8. **Give feedback** — say "that shot is good / meh / bad"; the agent calls `record_skill_outcome` to update skill confidence.
+9. **Compound** — a second reference video hitting the same skill merges evidence; 3 independent projects or 1 positive review promotes a skill to `active`.
 
-## 在网页里怎么用
+## How it works
 
-1. **给素材**：本地视频路径、小红书笔记链接（建议带 `xsec_token` 的完整 URL），或直接说想法。
-   例：“学习 `/path/reference.mp4` 的运镜和灯光，做一个 8 秒的雨夜街头对话镜头”。
-2. **Agent 学习**：小红书链接会先 `download_xhs_video` 下载，再调用 `study_reference_video`；页面实时显示切片、逐镜分析、归纳和技能抽取进度。完成后右侧出现镜头缩略图、风格圣经与技能库。
-3. **确认学习结果**：Agent 用中文汇报角色、场景、运镜和节奏；可以要求修正（`update_style_bible`）。
-4. **出定妆照 / 场景照**：`generate_still`。没有配置图片模型时，会把参考关键帧复制为参考图并明确说明。
-5. **写分镜**：`plan_shots`，每镜 4–15 秒整数；想让某镜继承参考片运镜，就设置 `referenceShotIds`。
-6. **预览提示词**：`build_shot_prompt`，不产生费用。会按素材自动选择 T2VA / I2VA / FL2VA / L2VA / Ref2VA。
-7. **确认后生成**：`generate_shot(confirmed=true)`。Agent 必须先展示分镜和提示词并得到你的明确同意。
-8. **回看与反馈**：右侧「分镜」里直接播放成片；告诉 Agent 某个镜头“好/一般/差”，它会用 `record_skill_outcome` 更新技能置信度。
-9. **持续积累**：第二部参考片命中同一条技能时会合并证据；3 个独立项目证据或 1 次好评会让技能升级为 active。
+### 1. Slicing (`src/learn/slice.ts`)
 
-## 产物结构
+`ffprobe` reads duration, size, fps and audio. Cut points come from `ffmpeg -vf "select='gt(scene,0.32)',metadata=print:file=-"`. Cuts closer than `minShotSeconds` are dropped; beyond `maxShots` the pipeline degrades to equal-length segments (marked with an `ACT:` note). Each shot yields a mid-point `frame.jpg` (960w), three samples at 15/50/85% (640w) for the vision model, a re-encoded `clip.mp4` usable as a Ref2VA reference, plus one `audio.m4a` for the whole film. Written to `learning/slice.json`.
+
+### 2. Annotation (`src/learn/annotate.ts`)
+
+One vision request per shot, multiple images in temporal order, strict JSON in return: framing, angle, movement, lighting, grade, composition, subject, wardrobe, location, action, expression, dialogue, sound, description, `h3ShotBlock`, style tags. With a single frame, `movement` is forced to `unable to determine` so the model cannot invent camera work. Progress is written back per shot, so a failed run resumes where it stopped (`force` re-annotates).
+
+### 3. Distillation (`src/learn/distill.ts`)
+
+Shot annotations are compressed into observation notes, then a text model emits `style` (with a unified `stylePrefix`), `characters`, `locations`, `cameraGrammar`, `rhythm`, `prompting`, `sound`. Referenced shot ids must exist in the manifest; character/location `refImages` are mapped from ids to keyframes, with a weak text match as fallback. If distillation fails, a rule-based version (frequency statistics) takes over so the slicing work is never wasted — the reason lands in `learning.warning`. Outputs `learning/styleBible.json` and `.md`, plus a reusable pack in `data/library/packs/`.
+
+### 4. Skill extraction (`src/learn/skills.ts`)
+
+Turns "what this film looks like" into "what to do next time a shot looks like this". One text call yields 3–8 candidate skills (kind, Chinese rule, English prompt fragment, use/avoid conditions, evidence shots). Candidates are matched against existing skills (tag Jaccard + text Jaccard + fragment Jaccard, threshold 0.52); a match merges evidence and bumps the version, otherwise a new `candidate` is created. Evidence keyframes are copied into `data/skills/<id>/evidence/` so the skill survives project deletion. LLM failure falls back to rule-based extraction; extraction failure never invalidates the study, it only records a warning.
+
+### Skill lifecycle
 
 ```
-data/
-├── settings.json
-├── cache/xhs/<noteId>-<时间>/             # yt-dlp 原始下载
-├── library/packs/<projectId>.json        # 可复用的学习风格包
-├── skills/<id>/
-│   ├── skill.json                        # 技能规则、证据、反馈、置信度、版本
-│   ├── SKILL.md                          # 人/Agent 可读
-│   └── evidence/                         # 证据关键帧（项目删除后仍保留）
-└── projects/<projectId>/
-    ├── project.json                      # 需求、风格圣经、分镜、素材索引
-    ├── session.json                      # 对话历史
-    ├── learning/
-    │   ├── slice.json                    # 镜头清单（时间、关键帧、片段、标注）
-    │   ├── styleBible.json / .md         # 风格圣经（机器读 / 人读）
-    │   ├── audio.m4a
-    │   └── shots/s01/{frame.jpg,sample*.jpg,clip.mp4}
-    └── assets/
-        ├── sources/                      # 小红书等外部下载的参考视频
-        ├── stills/                       # 定妆照 / 场景照
-        └── videos/                       # H3 生成的镜头
+extract ─▶ candidate (confidence ≈ 0.32)
+   ├─ matched by a new reference film → evidence +1, confidence up
+   ├─ positive review after rendering → active
+   ├─ evidence from 3 independent projects → active
+   ├─ ≥2 negative and more negative than positive → deprecated
+   └─ merge_skills → source deprecated + mergedInto
 ```
 
-## 项目结构
+Confidence = base 0.32 + evidence bonus (≤0.25) + feedback bonus (≤0.40) + usage bonus (≤0.08). Model self-assessment never enters the score.
+
+Before planning, the agent calls `search_skills` and then `read_skill`, dropping prompt fragments into the shot plan. `plan_shots` / `generate_shot` record `skillIds`, and `record_skill_outcome` writes the feedback back.
+
+### Generation modes
+
+`prepareReferences` picks a mode by priority:
+
+| Condition | Mode | icompify task / model |
+| --- | --- | --- |
+| explicit `firstFrame` + `lastFrame` | FL2VA | `fl2va` / `minimax-h3-fl2va` |
+| explicit `firstFrame` | I2VA | `fl2va` / `minimax-h3-fl2va` |
+| `referenceShotIds` with clips | Ref2VA | `ref2va` / `minimax-h3-ref2va` |
+| only character/location stills | I2VA | `fl2va` / `minimax-h3-fl2va` |
+| nothing | T2VA | `t2va` / `minimax-h3-fl2va` |
+
+Reference order: characters (`<Subject N>` / `<Picture N>`) → locations (`<Picture N>`) → reference clips (`<Video N>`). Platform limits: 4 images, 3 videos, 4–15 seconds, ≤140MB per asset.
+
+Prompts come from an LLM director call that must follow the official structure; anything missing, misordered, or over 7000 characters falls back to a deterministic skeleton that is valid by construction. `validatePrompt` enforces field presence and order, verbatim alignment sentences, six sections for Ref2VA, and the length cap.
+
+## Cost and safety guards
+
+- `build_shot_prompt`, `plan_shots`, skill operations: **free**.
+- `generate_shot`: **billed**, and refuses to run without `confirmed=true`. The agent must show the shot plan and prompt and get explicit consent first.
+- `study_reference_video` and `extract_skills` call paid models; progress is streamed so you can watch spend.
+- API keys live only in `data/settings.json` (chmod-friendly, git-ignored, masked in API responses). The repo ships a `pre-commit` hook that rejects staged secrets.
+- Reference footage is used for **style, camera work and art direction only**. Replicating a real person's identity is not the default; you are responsible for rights if you explicitly ask for it.
+
+## Project layout
 
 ```
 src/
-├── server.ts                 # Bun HTTP + SSE，静态页面
-├── cli.ts                    # 终端对话
-├── config.ts                 # settings 读写（密钥打码）
-├── types.ts                  # 领域模型
-├── agent/
-│   ├── loop.ts               # LLM ↔ 工具循环
-│   ├── prompt.ts             # 系统提示词 + 项目状态快照
-│   └── tools.ts              # 20 个 Agent 工具
-├── learn/
-│   ├── slice.ts              # ffmpeg 切镜、关键帧、片段、音轨
-│   ├── annotate.ts           # 视觉模型逐镜拉片（可断点续跑）
-│   ├── distill.ts            # 归纳风格圣经（失败回退规则版）
-│   ├── skills.ts             # 从学习结果抽取/合并跨项目技能
-│   └── study.ts              # 学习链路编排
-├── generate/
-│   ├── prompt.ts             # 参考素材决策 / H3 结构化提示词 / 校验
-│   ├── shot.ts               # 单镜头生成
-│   └── still.ts              # 定妆照 / 场景照
-├── providers/
-│   ├── llm.ts                # OpenAI 兼容文本 + 视觉 + 工具调用
-│   ├── image.ts              # OpenAI 兼容出图
-│   ├── download/xhs.ts       # 小红书短链展开 + yt-dlp + 校验
-│   └── video/icompify.ts     # icompify 创建/轮询/下载
-├── store/
-│   ├── projects.ts           # 项目、manifest、会话
-│   ├── library.ts            # 风格包保存/套用
-│   └── skills.ts             # 技能存储、检索、反馈、合并、SKILL.md
-└── util/                     # 文件、ffmpeg
-web/                          # 无构建步骤的原生页面
+├── server.ts             Bun HTTP + SSE + static hosting
+├── cli.ts                terminal chat
+├── config.ts             settings load/save (masking, secret preservation)
+├── types.ts              domain models
+├── agent/                conversation loop, system prompt, 20 tool handlers
+├── learn/                slice → annotate → distill → extract skills → orchestrate
+├── generate/             reference decision, H3 prompt, single shot, stills
+├── providers/            llm / image / download(xhs) / video(icompify) — protocol only
+├── store/                projects, manifests, sessions, style packs, skills
+└── util/                 fs and ffmpeg primitives
+web/                      dependency-free HTML/CSS/JS front end
+docs/                     skills, xhs download, H3 prompting, examples
 ```
 
-## 当前状态
+Data on disk (`data/`, ignored by git):
 
-已实际验证：
+```
+data/
+├── settings.json                     # keys — never commit
+├── cache/xhs/<noteId>-<ts>/          # raw yt-dlp downloads
+├── library/packs/<projectId>.json    # reusable style packs
+├── skills/<id>/{skill.json,SKILL.md,evidence/}
+└── projects/<projectId>/
+    ├── project.json  session.json
+    ├── learning/{slice.json,styleBible.json,.md,audio.m4a,shots/s01/...}
+    └── assets/{sources,stills,videos}/
+```
 
-- 本地切片：`ffmpeg` 切点检测 + 关键帧/采样/片段/音轨，12 秒 3 镜样本通过。
-- 学习链路：`deepseek-v4.1-flash` 逐镜分析 + 归纳风格圣经，3 镜约 4 分钟，角色/场景/运镜/灯光/节奏输出可用。
-- 技能库：从同一份学习结果自动抽取 7 条技能（camera/composition/lighting/rhythm/prompt/sound），写入 `skill.json` + `SKILL.md` + 证据图；记录一次好评后 candidate → active，置信度 0.39 → 0.79；`search_skills` 中文检索命中。
-- Agent 工具链：通过 LiteLLM 真实跑通 `read_learning_shots → update_brief → plan_shots → build_shot_prompt`，生成 6309 字符的合法 Ref2VA 提示词。
-- 小红书下载：`yt-dlp 2026.10.26` + Chrome 登录态，已用真实笔记 `6ad5e4c0…`（带 `xsec_token`）验证成功：9.45 秒、720×1280、含音轨，自动复制进项目 `assets/sources/`；进度条、metadata、ffprobe 校验均正常。短链/URL/分享文案解析与失败分支也已验证。
-- 服务端 / SSE / 设置接口 / 项目文件访问 / 技能 API 与页面渲染。
+`Project` is the single source of truth: `brief`, `learning`, `styleBible`, `plan[]`, `assets[]`. Shot plans store only `referenceShotIds`, never duplicated clips.
 
-已实际扣费验证：
+## Status
 
-- H3 T2VA 出片：9 秒 / 9:16，768×1344，含音轨，`video_id=video_9e930951…`，排队+推理约 141 秒。VLM 三帧质检判定“高度符合”，存在轻微机位漂移、手指与画框接触略融合、1s 鞋尖轻微裁切。详见 [generated-shot-example.md](docs/examples/generated-shot-example.md)。
-- 技能使用与反馈闭环：本次 8 条技能 `used+1`，自动质检后 4 条升级 active、3 条保持 candidate。
+Verified end to end:
 
-尚未验证：
+- Local slicing on a 12-second / 3-shot sample: scene detection, keyframes, samples, clips, audio.
+- Study pipeline with `deepseek-v4.1-flash`: 3 shots in ~4 minutes, usable characters / locations / camera / lighting / rhythm output.
+- Skill library: 7 skills auto-extracted from one study, written to `skill.json` + `SKILL.md` + evidence images; one positive review moved a candidate to `active` (0.39 → 0.79); Chinese lexical search hits.
+- Agent tool chain through LiteLLM: `read_learning_shots → update_brief → plan_shots → build_shot_prompt` produced a valid 6309-character Ref2VA prompt.
+- Xiaohongshu download with a real note (9.45s, 720×1280, with audio), including short-link/URL/share-text parsing and failure branches.
+- Server, SSE, settings API, project file access, skills API, front-end rendering.
+- One real billed H3 T2VA render: 9s, 9:16, 768×1344, with audio, ~141s queue+inference; a VLM three-frame check rated it "highly consistent" with minor camera drift and a slight finger/frame fusion.
 
-- I2VA / FL2VA / Ref2VA 的真实出片（T2VA 已验证；请求格式与 Toonflow provider 一致）。
+Not yet verified: real I2VA / FL2VA / Ref2VA renders (request shape mirrors the Toonflow provider; T2VA is proven).
 
-已知限制：
+## Limitations
 
-- 长视频超过 `learning.maxShots` 会退化为等分切片，丢失真实切点（代码中有 ACT 标注）。
-- 逐镜分析串行执行，40 镜约 10–20 分钟；失败可从已完成镜头继续。
-- 参考视频按“只借风格/运镜/美术”设计，不默认复刻原片人物身份；用户明确要求复刻时需自行确认版权。
-- 图片模型只支持文本生图，未接图生图/参考图编辑。
-- 风格包套用只复制被引用的图片和片段，不复制原项目分镜。
-- 小红书私密/已删除/地区限制笔记无法下载；Safari 读 Cookie 需要给终端完全磁盘访问权限。
-- 技能检索是词法匹配，不是向量检索；技能很多时可再升级。
+- Shot detection is heuristic: no gradual transitions, and films longer than `learning.maxShots` degrade to equal segments.
+- Annotation is serial: ~10–20 minutes for 40 shots. Failures resume from the last completed shot.
+- Skills are retrieved lexically, not by embedding.
+- Long-form assembly, subtitles and mixing are not implemented — one shot at a time.
+- The image provider is text-to-image only; no image editing or reference-image conditioning.
+- Applying a style pack copies only referenced images and clips, not the source project's shot plan.
+- Xiaohongshu download depends on `yt-dlp` and your own browser session; private, deleted or region-locked notes fail. Reading Safari cookies requires Full Disk Access for the terminal.
 
-## 路线图
+## Roadmap
 
-- 镜头级并行标注 + 断点重试队列
-- 技能向量检索 + 根据反馈自动改写规则
-- 分镜时间线编辑与整片拼接（ffmpeg concat + 转场）
-- 参考视频音频复用 / 对白驱动口型
-- 图片模型参考图编辑（角色一致性更强）
-- 风格包浏览、对比与增量合并
-- 成片质检（首尾帧偏差、身份漂移、运镜幅度）
+- Parallel shot annotation with a resumable retry queue
+- Vector skill retrieval plus feedback-driven rule rewriting
+- Timeline editing and whole-film assembly (ffmpeg concat + transitions)
+- Reusing reference audio / dialogue-driven lip sync
+- Reference-image editing for stronger character consistency
+- Style pack browsing, diffing and incremental merge
+- Rendered-output QA (first/last frame drift, identity drift, camera amplitude)
+
+## Documentation
+
+- [Skill library](docs/skills.md) — lifecycle, matching, confidence
+- [Xiaohongshu download](docs/xhs-download.md) — login state, failure modes
+- [H3 prompting](docs/h3-prompting.md) — official prompt structure
+- [Architecture](ARCHITECTURE.md) — request lifecycle and design rationale
+- Examples: [style bible](docs/examples/style-bible-example.md) · [Ref2VA prompt](docs/examples/ref2va-prompt-example.txt) · [skill](docs/examples/skill-example.md) · [generated shot](docs/examples/generated-shot-example.md)
+
+## Contributing
+
+Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) first. Please read [SECURITY.md](SECURITY.md) before reporting anything that looks like a credential leak.
+
+## License
+
+[MIT](LICENSE).
+
+## Disclaimer
+
+This tool is meant for learning *style, camera language and art direction*. Do not use it to impersonate real people, to redistribute other creators' footage, or to bypass paywalls and login walls. Xiaohongshu downloading relies on your own logged-in browser session and does not store cookies; you are responsible for complying with the platform's terms and with local copyright law. Generated content is your responsibility.

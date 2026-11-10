@@ -1,0 +1,67 @@
+name: Bug report
+description: Something is broken or behaves unexpectedly
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not paste API keys, tokens, or screenshots containing them.** Redact `data/settings.json` values, `xsec_token` query params, and absolute paths if they are private.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected vs. what actually happened.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. bun start
+        2. chat: "学习 /path/ref.mp4 ..."
+        3. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Slicing (ffmpeg / scene detection)
+        - Annotation (vision model)
+        - Distillation / style bible
+        - Skills (extract / merge / confidence)
+        - Xiaohongshu download
+        - Prompt building / mode selection
+        - Video generation (icompify / H3)
+        - Web UI / SSE
+        - Config / settings
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Output of `bun --version` and `ffmpeg -version | head -1`, plus the commit or release.
+      placeholder: bun 1.3.x · ffmpeg 7.x · commit abc1234
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      options: [macOS, Linux, Windows (untested), Other]
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: Server console or SSE error text. Redact secrets.
+      render: shell

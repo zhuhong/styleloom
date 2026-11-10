@@ -192,6 +192,6 @@ const server = Bun.serve({
   },
 });
 
-console.log(`VideoCopy Agent: http://${server.hostname}:${server.port}`);
+console.log(`StyleLoom Agent: http://${server.hostname}:${server.port}`);
 console.log(`数据目录: ${dataDir}`);
 console.log(`设置文件: ${settingsPath}`);

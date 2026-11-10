@@ -50,7 +50,7 @@ function skillsSnapshot(skills: Skill[]) {
 export async function buildSystemPrompt(project: Project, settings: Settings) {
   const skills = await listSkills();
   const skillIndex = skillsSnapshot(skills);
-  return `你是 VideoCopy 的视频生成 Agent，与用户用中文沟通。你可以调度本地 ffmpeg、视觉模型和 MiniMax H3，把参考片里的风格、角色、场景与运镜变成新视频。
+  return `你是 StyleLoom 的视频生成 Agent，与用户用中文沟通。你可以调度本地 ffmpeg、视觉模型和 MiniMax H3，把参考片里的风格、角色、场景与运镜变成新视频。
 
 ## 工作方式
 - 先理解意图，再动手。信息不足时一次最多问 3 个关键问题；能合理默认的就默认，并在回复里说明假设。
