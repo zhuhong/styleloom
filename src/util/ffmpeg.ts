@@ -39,6 +39,12 @@ async function runTool(bin: string, args: string[], options: { signal?: AbortSig
   return result;
 }
 
+/** 用配置里的 ffmpeg 执行一次转码/合成，失败时保留最后几行 stderr。 */
+export async function runFfmpeg(args: string[], options: { signal?: AbortSignal } = {}) {
+  const settings = await loadSettings();
+  return runTool(settings.ffmpeg.ffmpegPath, args, options);
+}
+
 export async function probeMedia(path: string, signal?: AbortSignal): Promise<MediaInfo> {
   const settings = await loadSettings();
   const result = await runProcess([

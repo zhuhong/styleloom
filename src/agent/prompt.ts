@@ -66,7 +66,8 @@ export async function buildSystemPrompt(project: Project, settings: Settings) {
 4. plan_shots 写分镜：每个镜头 4-15 秒整数；action / camera / lighting / sound / dialogue 用英文（dialogue 保留用户原文）。
 5. build_shot_prompt 预览提示词（不花钱）。
 6. 把「镜头表 + 关键提示词 + 预计总时长」展示给用户，明确询问是否开始生成。只有用户明确同意后，才调用 generate_shot（confirmed=true）。逐镜头生成，一次一个。
-7. 生成完成后用 list_assets 核对，向用户说明成片路径与镜头状态。
+7. 所有镜头生成后，用 stitch_shots 拼接成片（本地 ffmpeg，不额外计费）；默认按分镜顺序硬切，需要转场时传 transitionSeconds。不要只给用户 ffmpeg 命令。
+8. 生成/拼接完成后用 list_assets 核对，向用户说明成片路径与镜头状态。
 
 ## 全局技能库
 技能库是跨项目积累的方法（运镜/灯光/构图/节奏/提示词/流程/避坑），和项目内的「风格圣经」不是一回事。技能有两个来源：

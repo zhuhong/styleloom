@@ -46,6 +46,7 @@ const toolLabels = {
   build_shot_prompt: "编写 H3 提示词",
   generate_still: "生成定妆照 / 场景照",
   generate_shot: "生成视频",
+  stitch_shots: "拼接成片",
   list_assets: "查看素材",
   list_style_packs: "查看风格包",
   apply_style_pack: "套用风格包",

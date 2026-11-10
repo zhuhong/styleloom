@@ -10,6 +10,7 @@ import { applyStylePack, listStylePacks } from "../store/library";
 import { studyReferenceVideo } from "../learn/study";
 import { generateShot } from "../generate/shot";
 import { generateStill } from "../generate/still";
+import { stitchShots } from "../generate/stitch";
 import { composeShotPrompt, prepareReferences } from "../generate/prompt";
 import { downloadXhsVideo, extractUrlFromText, isXhsUrl } from "../providers/download/xhs";
 import { exportPublicSkill, mergeSkills, readSkillResolved, recordSkillOutcome, searchSkills, skillToSummary, updateSkill } from "../store/skills";
@@ -331,6 +332,19 @@ export const toolSpecs: ToolSpec[] = [
     },
   },
   {
+    name: "stitch_shots",
+    description: "把已生成的分镜视频按顺序拼接成一条成片（本地 ffmpeg，不产生模型费用）。默认拼接所有已生成镜头，支持硬切与叠化。",
+    parameters: {
+      type: "object",
+      properties: {
+        shotIds: { type: "array", items: { type: "string" }, description: "按顺序拼接的镜头 id；省略则拼接所有已生成镜头" },
+        outputName: { type: "string", description: "输出文件名，默认 final-项目名-总时长s.mp4" },
+        transitionSeconds: { type: "number", description: "镜头间叠化秒数；0 或省略为硬切" },
+        overwrite: { type: "boolean", description: "同名文件是否覆盖，默认 true" },
+      },
+    },
+  },
+  {
     name: "list_assets",
     description: "列出项目素材与分镜状态。",
     parameters: { type: "object", properties: {} },
@@ -600,6 +614,20 @@ async function generateShotTool(ctx: ToolContext, args: Args) {
   return { ok: true, ...result };
 }
 
+async function stitchShotsTool(ctx: ToolContext, args: Args) {
+  const result = await stitchShots({
+    project: ctx.project,
+    shotIds: stringArray(args, "shotIds"),
+    outputName: optString(args, "outputName"),
+    transitionSeconds: optNumber(args, "transitionSeconds"),
+    overwrite: args.overwrite !== false,
+    signal: ctx.signal,
+    onProgress: (percent, label) => ctx.emit({ type: "progress", scope: "stitch_shots", percent, label }),
+  });
+  ctx.emit({ type: "state", project: ctx.project });
+  return result;
+}
+
 async function generateStillTool(ctx: ToolContext, args: Args) {
   const target = reqString(args, "target");
   if (target !== "character" && target !== "location") throw new Error("target 只能是 character 或 location");
@@ -727,6 +755,7 @@ const handlers: Record<string, (ctx: ToolContext, args: Args) => Promise<unknown
   build_shot_prompt: buildPrompt,
   generate_shot: generateShotTool,
   generate_still: generateStillTool,
+  stitch_shots: stitchShotsTool,
   list_assets: listAssets,
   list_style_packs: async (ctx, args) => ({ ok: true, packs: await listStylePacks(), note: "可用 apply_style_pack 套用" }),
   apply_style_pack: applyPack,

@@ -174,6 +174,7 @@ Agent 在规划前 `search_skills`、命中后 `read_skill`，把 prompt fragmen
 | `build_shot_prompt` | 生成并校验 H3 提示词 | 文本模型 |
 | `generate_still` | 定妆照/场景照（可回退参考帧） | 图片模型 |
 | `generate_shot` | H3 生成单镜（需确认） | **视频计费** |
+| `stitch_shots` | 统一转码后拼接分镜（硬切/叠化），输出成片 | 无（本地 ffmpeg） |
 | `list_assets` | 查看状态 | 无 |
 | `list_style_packs` | 查看风格包 | 无 |
 | `apply_style_pack` | 套用风格包并复制引用素材 | 无 |
@@ -193,8 +194,8 @@ Agent 在规划前 `search_skills`、命中后 `read_skill`，把 prompt fragmen
 
 - 切片检测是启发式，不识别渐变转场；长片按等分退化。
 - 标注串行，无并发限流；生产环境建议按供应商 QPS 加队列。
-- 未做整片拼接、字幕、混音。
-- `generate_shot` 尚未做真实扣费验证；首次使用建议 4 秒单镜。
+- 已支持硬切/叠化拼接；字幕、复杂转场、混音与多轨编辑未做。
+- `generate_shot` 已做 T2VA / Ref2VA 真实计费验证；首次使用仍建议 4 秒单镜。
 - 风格包不做版本合并，套用是整体替换。
 - 技能检索是词法匹配，不做语义向量；反馈不会自动改写规则，需要 Agent/人工 `update_skill`。
 - 小红书下载依赖 yt-dlp 和浏览器登录态，私密/地区限制/风控笔记会失败。

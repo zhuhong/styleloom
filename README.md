@@ -170,7 +170,7 @@ src/
 ├── cli.ts                terminal chat
 ├── config.ts             settings load/save (masking, secret preservation)
 ├── types.ts              domain models
-├── agent/                conversation loop, system prompt, 20 tool handlers
+├── agent/                conversation loop, system prompt, 22 tool handlers
 ├── learn/                slice → annotate → distill → extract skills → orchestrate
 ├── generate/             reference decision, H3 prompt, single shot, stills
 ├── providers/            llm / image / download(xhs) / video(icompify) — protocol only
@@ -211,6 +211,7 @@ Verified end to end:
 - One real billed H3 T2VA render: 9s, 9:16, 768×1344, with audio, ~141s queue+inference; a VLM three-frame check rated it "highly consistent" with minor camera drift and a slight finger/frame fusion.
 - One real billed H3 Ref2VA render from a character still + an empty location still: 9s, 9:16, 768×1344, with audio, ~248s; the VLM check rated identity, room and framing "highly consistent", with no crop or drift and only minor hand/switch-panel artifacts.
 - A second reference (120s Xiaohongshu climbing video, 16 shots): 8 skills extracted; a 9s Ref2VA climbing shot rendered in ~248s and rated "highly consistent" for action, identity and gym layout; five camera/lighting/color skills moved to `active` (0.80).
+- Timeline stitching: `stitch_shots` normalizes clips with ffmpeg, then hard-cuts or crossfades into a final H.264/AAC asset. Verified on the 4-shot `名画上街` project: 20.73s hard cut, 19.84s with a 0.3s crossfade.
 
 Not yet verified: real I2VA / FL2VA renders (request shape mirrors the Toonflow provider; T2VA and Ref2VA are proven).
 
@@ -219,7 +220,7 @@ Not yet verified: real I2VA / FL2VA renders (request shape mirrors the Toonflow 
 - Shot detection is heuristic: no gradual transitions, and films longer than `learning.maxShots` degrade to equal segments.
 - Annotation is serial: ~10–20 minutes for 40 shots. Failures resume from the last completed shot.
 - Skills are retrieved lexically, not by embedding.
-- Long-form assembly, subtitles and mixing are not implemented — one shot at a time.
+- Basic assembly is implemented (hard cut / crossfade), but subtitles, complex transitions, audio mixing and multi-track editing are not.
 - The image provider is text-to-image only; no image editing or reference-image conditioning.
 - Applying a style pack copies only referenced images and clips, not the source project's shot plan.
 - Xiaohongshu download depends on `yt-dlp` and your own browser session; private, deleted or region-locked notes fail. Reading Safari cookies requires Full Disk Access for the terminal.
@@ -228,7 +229,7 @@ Not yet verified: real I2VA / FL2VA renders (request shape mirrors the Toonflow 
 
 - Parallel shot annotation with a resumable retry queue
 - Vector skill retrieval plus feedback-driven rule rewriting
-- Timeline editing and whole-film assembly (ffmpeg concat + transitions)
+- Multi-track timeline editing, subtitles and audio mixing
 - Reusing reference audio / dialogue-driven lip sync
 - Reference-image editing for stronger character consistency
 - Style pack browsing, diffing and incremental merge
