@@ -1,0 +1,13 @@
+node_modules/
+data/
+*.log
+.DS_Store
+
+# 密钥与本地环境：data/ 已整体忽略，这里再显式兜底，避免以后调整 data/ 规则时误提交
+data/settings.json
+data/settings.local.json
+.env
+.env.*
+!.env.example
+*.pem
+*.key

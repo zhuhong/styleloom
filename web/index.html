@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VideoCopy · 视频学习与生成 Agent</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brandMark"></span>
+        <div>
+          <strong>VideoCopy</strong>
+          <small>从参考片学习，再用 MiniMax H3 生成</small>
+        </div>
+      </div>
+      <div class="topActions">
+        <span id="engineState" class="engineState">检查配置…</span>
+        <button id="settingsButton" class="ghost">设置</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <aside class="sidebar">
+        <div class="sideHeader">
+          <span>项目</span>
+          <button id="newProjectButton" class="iconButton" title="新建项目">＋</button>
+        </div>
+        <div id="projectList" class="projectList"></div>
+        <div class="sideHeader packsHeader"><span>风格包</span></div>
+        <div id="packList" class="packList"></div>
+      </aside>
+
+      <section class="chatPane">
+        <div id="messages" class="messages">
+          <div class="emptyState">
+            <h2>先给一个参考片，或者直接说想法</h2>
+            <p>例：学习 <code>/Users/you/Movies/reference.mp4</code> 的运镜和光线，做一个 8 秒的雨夜街头镜头。</p>
+            <p>也可以直接粘贴小红书笔记链接（带 xsec_token 的完整 URL），我会先下载再拉片。</p>
+            <p>学习流程：ffmpeg 切片 → 视觉模型逐镜头拉片 → 归纳定妆照、场景照、运镜与节奏 → H3 生成。</p>
+          </div>
+        </div>
+        <form id="composer" class="composer">
+          <textarea id="input" rows="2" placeholder="和 Agent 沟通：提供参考视频路径、创作想法、修改意见…"></textarea>
+          <button id="sendButton" type="submit">发送</button>
+        </form>
+        <div class="composerHint">Enter 发送 · Shift+Enter 换行 · 生成会产生 H3 费用，Agent 会先征得确认</div>
+      </section>
+
+      <aside id="inspector" class="inspector">
+        <div class="emptyState small"><p>选择或新建项目后，这里显示学习成果、分镜与素材。</p></div>
+      </aside>
+    </main>
+
+    <dialog id="settingsDialog" class="settingsDialog">
+      <form method="dialog" id="settingsForm">
+        <h2>设置</h2>
+        <p class="dialogHint">密钥只保存在本机 <code>data/settings.json</code>。留空表示不配置。</p>
+        <section>
+          <h3>语言 / 视觉模型</h3>
+          <label>请求地址<input name="llm.baseUrl" placeholder="http://localhost:4000/v1" /></label>
+          <label>API Key<input name="llm.apiKey" type="password" placeholder="留空或保持 ********" /></label>
+          <label>文本模型<input name="llm.model" placeholder="deepseek-v4.1-flash" /></label>
+          <label>视觉模型<input name="llm.visionModel" placeholder="ag-gemini-3.8-flash" /></label>
+        </section>
+        <section>
+          <h3>MiniMax H3（icompify）</h3>
+          <label>请求地址<input name="video.baseUrl" placeholder="https://api.icompify.com" /></label>
+          <label>API Key<input name="video.apiKey" type="password" placeholder="留空或保持 ********" /></label>
+          <label>文生/首尾帧模型<input name="video.model" /></label>
+          <label>参考模型<input name="video.referenceModel" /></label>
+        </section>
+        <section>
+          <h3>小红书视频下载</h3>
+          <label>yt-dlp 路径<input name="xhs.ytDlpPath" placeholder="yt-dlp" /></label>
+          <label>浏览器 Cookie<input name="xhs.cookiesFromBrowser" placeholder="chrome / safari / 留空" /></label>
+          <label>Referer<input name="xhs.referer" placeholder="https://www.xiaohongshu.com" /></label>
+          <p class="dialogHint">需要先在对应浏览器登录小红书；Safari 需要给终端完全磁盘访问权限。</p>
+        </section>
+        <section>
+          <h3>图片模型（定妆照 / 场景照，可选）</h3>
+          <label>接口类型<input name="image.api" placeholder="auto / openai / openrouter" /></label>
+          <label>请求地址<input name="image.baseUrl" placeholder="OpenAI 兼容 /v1 或 OpenRouter /v1" /></label>
+          <label>API Key<input name="image.apiKey" type="password" /></label>
+          <label>模型<input name="image.model" placeholder="例如 qwen-image-2.1-turbo" /></label>
+          <label>尺寸<input name="image.size" placeholder="1344x768" /></label>
+        </section>
+        <div class="dialogActions">
+          <button value="cancel" class="ghost">取消</button>
+          <button value="save" id="saveSettings" class="primary">保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

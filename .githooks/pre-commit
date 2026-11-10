@@ -1,0 +1,25 @@
+#!/bin/sh
+# 阻止密钥进入版本库。
+# 启用方式：git config core.hooksPath .githooks
+set -e
+
+# 1) 禁止提交真实设置文件（data/ 已忽略，这里防 -f 强加）
+blocked=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^(data/settings\.json|data/settings\.local\.json|\.env(\..*)?)$' || true)
+if [ -n "$blocked" ]; then
+  echo "✗ 拒绝提交：以下文件可能包含密钥" >&2
+  echo "$blocked" | sed 's/^/    /' >&2
+  echo "  如确需提交，请先确认内容已脱敏。" >&2
+  exit 1
+fi
+
+# 2) 扫描新增行中的密钥特征
+patterns='sk-[A-Za-z0-9_-]{16,}|sk-or-v1-[A-Za-z0-9]{16,}|Bearer [A-Za-z0-9._-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|"apiKey"[[:space:]]*:[[:space:]]*"[^"]{16,}"'
+hits=$(git diff --cached -U0 --diff-filter=ACM | grep -E '^\+' | grep -vE '^\+\+\+' | grep -nE "$patterns" | sed -E 's/(sk-[A-Za-z0-9_-]{4})[A-Za-z0-9_-]*/\1***/g; s/(Bearer )[A-Za-z0-9._-]{6}[A-Za-z0-9._-]*/\1***/g' || true)
+if [ -n "$hits" ]; then
+  echo "✗ 拒绝提交：检测到疑似密钥（已脱敏显示）" >&2
+  echo "$hits" | sed 's/^/    /' >&2
+  echo "  请移除后重试；若为文档占位符，改写为 <your-key> 形式。" >&2
+  exit 1
+fi
+
+exit 0

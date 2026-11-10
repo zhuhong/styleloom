@@ -1,0 +1,51 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8787
+  },
+  "llm": {
+    "baseUrl": "http://localhost:4000/v1",
+    "apiKey": "",
+    "model": "deepseek-v4.1-flash",
+    "visionModel": "deepseek-v4.1-flash",
+    "temperature": 0.6,
+    "maxTokens": 8192
+  },
+  "video": {
+    "provider": "icompify",
+    "baseUrl": "https://api.icompify.com",
+    "apiKey": "",
+    "model": "minimax-h3-fl2va",
+    "referenceModel": "minimax-h3-ref2va",
+    "shortEdge": 768,
+    "aspectRatio": "16:9",
+    "steps": 50,
+    "pollIntervalMs": 10000,
+    "maxWaitMs": 3600000
+  },
+  "image": {
+    "api": "auto",
+    "baseUrl": "",
+    "apiKey": "",
+    "model": "",
+    "size": "2K"
+  },
+  "xhs": {
+    "ytDlpPath": "yt-dlp",
+    "cookiesFromBrowser": "chrome",
+    "referer": "https://www.xiaohongshu.com",
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "timeoutMs": 300000
+  },
+  "ffmpeg": {
+    "ffmpegPath": "ffmpeg",
+    "ffprobePath": "ffprobe"
+  },
+  "learning": {
+    "sceneThreshold": 0.32,
+    "minShotSeconds": 0.6,
+    "maxShots": 40,
+    "sampleCount": 3,
+    "keepClips": true
+  }
+}
