@@ -130,6 +130,8 @@ Agent 在规划前 `search_skills`、命中后 `read_skill`，把 prompt fragmen
 
 参考图顺序：角色（`<Subject N>` / `<Picture N>`）→ 场景（`<Picture N>`）→ 参考片段（`<Video N>`）。最多 4 图 / 3 视频，与平台限制一致。
 
+`shot.generationMode` 可以强制模式（`auto` / `t2va` / `i2va` / `fl2va` / `l2va` / `ref2va`）。实测“人物定妆照 + 空场景照”两张参考图走 `ref2va` 时，身份、服装、房间与构图明显比纯文字稳定；纯文字更适合不想依赖图片模型、且允许一定漂移的场景。
+
 提示词有两种来源：
 
 1. **LLM 编写**：把分镜、风格圣经、参考标签交给提示词导演模型，要求按官方结构输出；长度超限会再请求一次压缩。
@@ -178,7 +180,7 @@ Agent 在规划前 `search_skills`、命中后 `read_skill`，把 prompt fragmen
 
 - **换文本/视觉模型**：只改 `settings.json`。任何 OpenAI 兼容网关都能用；工具调用需要网关支持 `tools`。
 - **换视频供应商**：实现 `generateVideoJob` 同签名函数，或在 `providers/video/` 增加分支。
-- **换图片供应商**：替换 `providers/image.ts`，保持 `{ bytes, mimeType, model }` 返回。
+- **换图片供应商**：`providers/image.ts` 支持 OpenAI `/images/generations` 与 OpenRouter `/images`（Qwen Image），通过 `image.api` 切换；返回 `{ bytes, mimeType, model }`。
 - **加镜头技能**（例如口型、音乐、转场）：新工具 + `agent/prompt.ts` 里的流程说明；重活放到 `src/generate/`。
 - **接工作流画布**：`styleBible`、`slice.json`、`plan[]` 都是稳定 JSON，可直接映射到节点/连线。
 - **换技能检索**：`store/skills.ts` 的 `searchSkills` 是唯一检索入口，可替换为 embedding/向量库而不影响工具层。
