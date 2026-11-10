@@ -11,7 +11,7 @@ Thanks for taking a look. This project is small on purpose: no bundler, no runti
 ## Development setup
 
 ```bash
-git clone <repo-url> styleloom
+git clone https://github.com/zhuhong/styleloom.git
 cd styleloom
 bun install
 mkdir -p data && cp settings.example.json data/settings.json

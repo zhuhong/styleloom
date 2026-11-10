@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/OWNER/REPO/security/advisories/new
+    url: https://github.com/zhuhong/styleloom/security/advisories/new
     about: Report credential leaks or injection issues privately. Do not open a public issue.
   - name: Architecture and design questions
-    url: https://github.com/OWNER/REPO/blob/main/ARCHITECTURE.md
+    url: https://github.com/zhuhong/styleloom/blob/main/ARCHITECTURE.md
     about: Most "how does it work" questions are answered here.

@@ -46,7 +46,7 @@ reference video ──ffmpeg──▶ shots / keyframes / reference clips
 Requirements: macOS or Linux (Windows untested), [Bun](https://bun.sh) 1.3+, local `ffmpeg` and `ffprobe`. Xiaohongshu download additionally needs `yt-dlp` (`brew install yt-dlp`).
 
 ```bash
-git clone <repo-url> styleloom
+git clone https://github.com/zhuhong/styleloom.git
 cd styleloom
 bun install
 mkdir -p data && cp settings.example.json data/settings.json
