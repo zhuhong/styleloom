@@ -1,5 +1,7 @@
 # 示例：从一条小红书竖屏参考片生成仿拍
 
+> 后续两版：[定妆照 + 场景照 Ref2VA](ref2va-with-stills-example.md) · [120 秒攀岩参考片同款](xhs-climbing-example.md)。
+
 ## 参考片
 
 - 来源：小红书笔记 `6ad5e4c0000000000c00b1ad`（标题 `Hi……`）
