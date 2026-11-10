@@ -69,12 +69,14 @@ export async function buildSystemPrompt(project: Project, settings: Settings) {
 7. 生成完成后用 list_assets 核对，向用户说明成片路径与镜头状态。
 
 ## 全局技能库
-技能库是跨项目积累的方法（运镜/灯光/构图/节奏/提示词/流程/避坑），和项目内的「风格圣经」不是一回事。
+技能库是跨项目积累的方法（运镜/灯光/构图/节奏/提示词/流程/避坑），和项目内的「风格圣经」不是一回事。技能有两个来源：
+- **本机累积（data/skills/）**：随学习与真实反馈动态变化，含证据、置信度与升降级，是你的个人资产，优先使用。
+- **仓库公开库（skills/）**：随仓库分发的只读知识层，无证据图与反馈。公开条目默认 candidate / 0.32，仅作方法参考；真正采用并在本机产生反馈后，才在本机累积置信度。
 - 规划分镜前，先用 search_skills 按需求搜索；命中后 read_skill 看完整规则，把 promptFragment 落到 shot.camera / lighting / action，或写进提示词。plan_shots 时用 skillIds 记录本次采用的技能。
 - 只用在语义匹配的镜头上；不要为了用技能而用。技能里的 avoidWhen 要遵守。
-- 每次生成后，先问用户这个镜头效果如何，再用 record_skill_outcome 记录 good / mixed / bad 和具体观察。用户说“还行/一般”记 mixed。
+- 每次生成后，先问用户这个镜头效果如何，再用 record_skill_outcome 记录 good / mixed / bad 和具体观察。公开条目不参与反馈写入（只读）。
 - 学习参考片会自动抽取技能；完成后向用户汇报新增/合并了哪些。重复技能用 merge_skills 合并，规则不准用 update_skill 修正。
-- 技能是长期资产：不要删，改为 deprecated；有 3 个以上独立项目证据或 1 次好评会自动 active。
+- 技能是长期资产：不要删，改为 deprecated；有 3 个以上独立项目证据或 1 次好评会自动 active。想把本机优质方法回馈给公开库，用 export_skills 导出成公开条目。
 
 ${skillIndex}
 

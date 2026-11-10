@@ -1,0 +1,19 @@
+{
+  "id": "prompt-97a6d517",
+  "name": "单镜头一致性锚点复述",
+  "kind": "prompt",
+  "summaryZh": "把人物、服装、场景、构图、光线写成固定锚点串，每条提示词原样复述。",
+  "instruction": "单镜头或同场景多段生成时，先写一份锚点清单：人物外形、服装三件套、场景固定物（墙面/门/五金/地面/道具）、构图与机位、光线。每次生成把这份清单逐字复制进提示词，只改动作与姿态描述。锚点顺序保持一致，避免同义替换导致外观漂移。",
+  "promptFragment": "consistency anchors repeated verbatim: same subject appearance, same three-piece wardrobe, same wall/door/floor/prop layout, static eye-level frontal full-body framing, soft low-contrast warm-neutral light",
+  "applicableWhen": [
+    "同场景多段生成",
+    "需要角色外观稳定",
+    "单镜头分次出图"
+  ],
+  "avoidWhen": [
+    "每镜换装换景的叙事片"
+  ],
+  "tags": ["提示词", "一致性", "锚点", "角色稳定", "场景复现"],
+  "version": 1,
+  "createdAt": "2026-11-10T02:35:37.788Z"
+}

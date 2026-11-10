@@ -12,7 +12,7 @@ import { generateShot } from "../generate/shot";
 import { generateStill } from "../generate/still";
 import { composeShotPrompt, prepareReferences } from "../generate/prompt";
 import { downloadXhsVideo, extractUrlFromText, isXhsUrl } from "../providers/download/xhs";
-import { getSkill, markSkillRead, mergeSkills, recordSkillOutcome, searchSkills, skillToSummary, updateSkill } from "../store/skills";
+import { exportPublicSkill, mergeSkills, readSkillResolved, recordSkillOutcome, searchSkills, skillToSummary, updateSkill } from "../store/skills";
 import { extractSkillsFromStudy } from "../learn/skills";
 
 export type ToolContext = {
@@ -176,7 +176,7 @@ export const toolSpecs: ToolSpec[] = [
   },
   {
     name: "search_skills",
-    description: "搜索全局技能库（跨项目积累的运镜/灯光/构图/节奏/提示词方法）。规划分镜或写提示词前先搜索。",
+    description: "搜索技能库（本机累积 data/skills + 仓库公开 skills/）。规划分镜或写提示词前先搜索。公开技能默认 candidate/0.32，仅作知识参考；本机技能优先。",
     parameters: {
       type: "object",
       properties: {
@@ -189,7 +189,7 @@ export const toolSpecs: ToolSpec[] = [
   },
   {
     name: "read_skill",
-    description: "读取一条技能的完整规则、H3 prompt fragment、证据与历史。",
+    description: "读取一条技能（本机或公开库）的完整规则、H3 prompt fragment 与可用性；公开条目只读、不记反馈。",
     parameters: {
       type: "object",
       properties: { id: { type: "string" } },
@@ -237,6 +237,19 @@ export const toolSpecs: ToolSpec[] = [
       type: "object",
       properties: { sourceId: { type: "string" }, targetId: { type: "string" } },
       required: ["sourceId", "targetId"],
+    },
+  },
+  {
+    name: "export_skills",
+    description: "把本机一条技能导出为公开条目到仓库 skills/（剥离证据图、反馈与置信度等私有字段）。用于把本地优质方法贡献回公开技能库。",
+    parameters: {
+      type: "object",
+      properties: {
+        skillId: { type: "string" },
+        dryRun: { type: "boolean", description: "只预览不写入" },
+        overwrite: { type: "boolean", description: "覆盖已存在的同名公开技能" },
+      },
+      required: ["skillId"],
     },
   },
   {
@@ -644,8 +657,16 @@ async function searchSkillsTool(_ctx: ToolContext, args: Args) {
 }
 
 async function readSkillTool(_ctx: ToolContext, args: Args) {
-  const skill = await markSkillRead(reqString(args, "id"));
-  return { ok: true, skill, markdown: `skills/${skill.id}/SKILL.md` };
+  const { skill, source, markdownPath } = await readSkillResolved(reqString(args, "id"));
+  return { ok: true, skill: skillToSummary(skill), source, markdownPath };
+}
+
+async function exportSkillsTool(_ctx: ToolContext, args: Args) {
+  const result = await exportPublicSkill(reqString(args, "skillId"), {
+    dryRun: args.dryRun === true,
+    overwrite: args.overwrite === true,
+  });
+  return result;
 }
 
 async function extractSkillsTool(ctx: ToolContext) {
@@ -700,6 +721,7 @@ const handlers: Record<string, (ctx: ToolContext, args: Args) => Promise<unknown
   record_skill_outcome: recordSkillOutcomeTool,
   update_skill: updateSkillTool,
   merge_skills: mergeSkillsTool,
+  export_skills: exportSkillsTool,
   update_style_bible: updateBible,
   plan_shots: planShots,
   build_shot_prompt: buildPrompt,

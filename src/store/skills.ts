@@ -1,11 +1,12 @@
 import { join } from "node:path";
-import { dataDir } from "../config";
-import type { Skill, SkillDraft, SkillEvidence, SkillKind, SkillOutcome, SkillStatus } from "../types";
+import { appRoot, dataDir } from "../config";
+import type { PublicSkill, Skill, SkillDraft, SkillEvidence, SkillKind, SkillOutcome, SkillStatus } from "../types";
 import { ensureDir, exists, listDirs, nowIso, readJsonIfExists, safeJoin, writeJson, writeText } from "../util/fs";
 
 export const skillKinds: SkillKind[] = ["camera", "lighting", "color", "composition", "rhythm", "prompt", "sound", "workflow", "avoid"];
 
 let cache: Skill[] | undefined;
+let publicCache: Skill[] | undefined;
 
 export function skillsDir() {
   return join(dataDir, "skills");
@@ -24,8 +25,59 @@ export function skillMarkdownPath(id: string) {
   return join(skillDir(id), "SKILL.md");
 }
 
+/** 公开技能库（随仓库分发的只读知识层）。 */
+export function publicSkillsDir() {
+  return join(appRoot, "skills");
+}
+
+function publicSkillDir(id: string) {
+  if (!/^[\p{L}\p{N}_.-]+$/u.test(id)) throw new Error("非法技能 ID");
+  return join(publicSkillsDir(), id);
+}
+
+function publicSkillJsonPath(id: string) {
+  return join(publicSkillDir(id), "skill.json");
+}
+
 export function invalidateSkillsCache() {
   cache = undefined;
+  publicCache = undefined;
+}
+
+/** 把公开条目 hydrate 成完整 Skill：默认 candidate / 0.32，无证据与反馈，标记 source=public。 */
+function hydratePublic(item: PublicSkill): Skill {
+  return {
+    id: item.id,
+    name: item.name,
+    kind: item.kind,
+    status: "candidate",
+    summaryZh: item.summaryZh,
+    instruction: item.instruction,
+    promptFragment: item.promptFragment,
+    applicableWhen: item.applicableWhen,
+    avoidWhen: item.avoidWhen,
+    tags: item.tags,
+    evidence: [],
+    outcomes: [],
+    stats: { used: 0, reads: 0, good: 0, mixed: 0, bad: 0 },
+    confidence: 0.32,
+    version: item.version,
+    createdAt: item.createdAt ?? "",
+    updatedAt: "",
+    revisions: [],
+    source: "public",
+  };
+}
+
+async function listPublicSkills(force = false): Promise<Skill[]> {
+  if (publicCache && !force) return publicCache;
+  const ids = await listDirs(publicSkillsDir());
+  const items = await Promise.all(ids.map(id => readJsonIfExists<PublicSkill>(join(publicSkillsDir(), id, "skill.json"))));
+  publicCache = items
+    .filter((item): item is PublicSkill => Boolean(item?.id && item.name))
+    .map(hydratePublic)
+    .sort((left, right) => left.name.localeCompare(right.name, "zh-CN"));
+  return publicCache;
 }
 
 export async function listSkills(force = false): Promise<Skill[]> {
@@ -45,6 +97,18 @@ export async function getSkill(id: string): Promise<Skill> {
   const skill = await readJsonIfExists<Skill>(skillJsonPath(id));
   if (!skill) throw new Error(`技能不存在：${id}`);
   return skill;
+}
+
+/** 读取技能（读路径：先本机，后公开库）。本机命中时记一次阅读；公开条目只读、不打点统计。 */
+export async function readSkillResolved(id: string) {
+  const local = await readJsonIfExists<Skill>(skillJsonPath(id));
+  if (local) {
+    await markSkillRead(id);
+    return { skill: local, source: "local" as const, markdownPath: join("data/skills", id, "SKILL.md") };
+  }
+  const item = await readJsonIfExists<PublicSkill>(publicSkillJsonPath(id));
+  if (!item) throw new Error(`技能不存在：${id}`);
+  return { skill: hydratePublic(item), source: "public" as const, markdownPath: join("skills", id, "SKILL.md") };
 }
 
 export async function writeSkill(skill: Skill) {
@@ -252,7 +316,10 @@ const kindHints: Record<string, SkillKind> = {
 };
 
 export async function searchSkills(query: string, options: { kind?: SkillKind; limit?: number; includeDeprecated?: boolean } = {}) {
-  const skills = await listSkills();
+  const local = await listSkills();
+  const localIds = new Set(local.map(skill => skill.id));
+  // 本机累积 + 仓库公开库；同 id 时本机覆盖公开（本机是个人资产，公开是知识参考）。
+  const skills = [...local, ...(await listPublicSkills()).filter(skill => !localIds.has(skill.id))];
   const text = query.trim().toLowerCase();
   const queryTokens = tokens(text);
   const hintedKinds = new Set(Object.entries(kindHints).filter(([word]) => text.includes(word)).map(([, kind]) => kind));
@@ -459,6 +526,75 @@ export function skillToMarkdown(skill: Skill) {
 
 export function skillEvidenceFile(skillId: string, relative: string) {
   return safeJoin(skillDir(skillId), relative);
+}
+
+/** 公开技能的可读 Markdown：不含证据图、反馈与置信度等私有/版权字段。 */
+export function publicSkillToMarkdown(item: PublicSkill) {
+  const lines: string[] = [];
+  lines.push("---");
+  lines.push(`id: ${item.id}`);
+  lines.push(`name: ${item.name}`);
+  lines.push(`kind: ${item.kind}`);
+  lines.push(`version: ${item.version}`);
+  lines.push(`source: public`);
+  lines.push(`tags: ${item.tags.join(", ")}`);
+  lines.push("---");
+  lines.push("");
+  lines.push(`# ${item.name}`);
+  lines.push("");
+  lines.push(item.summaryZh || "");
+  lines.push("");
+  lines.push("## 何时使用");
+  lines.push(item.applicableWhen.length ? item.applicableWhen.map(value => `- ${value}`).join("\n") : "- 未限定");
+  if (item.avoidWhen.length) {
+    lines.push("");
+    lines.push("## 避免使用");
+    lines.push(item.avoidWhen.map(value => `- ${value}`).join("\n"));
+  }
+  lines.push("");
+  lines.push("## 执行规则");
+  lines.push(item.instruction || "-");
+  lines.push("");
+  lines.push("## H3 prompt fragment");
+  lines.push("```text");
+  lines.push(item.promptFragment || "N/A");
+  lines.push("```");
+  lines.push("");
+  lines.push("## 说明");
+  lines.push("本条目为公开技能，不含证据图与使用反馈（涉及第三方素材版权与个人使用数据）。");
+  lines.push("证据与置信度只在本机 `data/skills/<id>/` 中累积；如需查看原始证据，请在本机学习结果中检索。");
+  return `${lines.join("\n")}\n`;
+}
+
+/** 把本机一条技能导出为公开条目（剥离证据/反馈/置信度/统计等私有字段）。 */
+export async function exportPublicSkill(id: string, options: { dryRun?: boolean; overwrite?: boolean } = {}) {
+  const skill = await getSkill(id);
+  const item: PublicSkill = {
+    id: skill.id,
+    name: skill.name,
+    kind: skill.kind,
+    summaryZh: skill.summaryZh,
+    instruction: skill.instruction,
+    promptFragment: skill.promptFragment,
+    applicableWhen: skill.applicableWhen,
+    avoidWhen: skill.avoidWhen,
+    tags: skill.tags,
+    version: skill.version,
+    createdAt: skill.createdAt,
+  };
+  const dir = publicSkillDir(id);
+  const target = join(publicSkillsDir(), id);
+  if (!options.dryRun && (await exists(join(dir, "skill.json"))) && !options.overwrite) {
+    throw new Error(`公开技能已存在：${id}（需要 overwrite=true 覆盖）`);
+  }
+  if (options.dryRun) {
+    return { ok: true, dryRun: true, id, path: `skills/${id}/`, publicSkill: item };
+  }
+  await ensureDir(dir);
+  await writeJson(join(dir, "skill.json"), item);
+  await writeText(join(dir, "SKILL.md"), publicSkillToMarkdown(item));
+  invalidateSkillsCache();
+  return { ok: true, id, path: `skills/${id}/`, publicSkill: item, target };
 }
 
 export { exists };

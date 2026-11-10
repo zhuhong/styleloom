@@ -153,6 +153,8 @@ Agent 在规划前 `search_skills`、命中后 `read_skill`，把 prompt fragmen
 
 `Skill`（`data/skills/<id>/skill.json`）是全局资产：规则、prompt fragment、证据（项目/镜头/证据图）、反馈、置信度、状态、版本与修订历史。`SKILL.md` 由 JSON 生成，便于人和 Agent 阅读。
 
+公开技能库 `skills/<id>/` 是另一层：只存 kind/name/summaryZh/instruction/promptFragment/applicableWhen/avoidWhen/tags/version 等**可分发知识**，无证据图（第三方版权）、无反馈与置信度。运行时 `searchSkills` / `readSkillResolved` 合并本机 `data/skills/` 与公开 `skills/`，同 id 时本机覆盖公开；公开条目 hydrate 成默认 `candidate / 0.32`，不写回、不记反馈。`export_skills` 负责把本机技能剥离私有字段后导出到 `skills/`。
+
 ## 工具目录
 
 | 工具 | 作用 | 费用 |
@@ -166,6 +168,7 @@ Agent 在规划前 `search_skills`、命中后 `read_skill`，把 prompt fragmen
 | `extract_skills` | 从当前项目补跑技能抽取 | 文本模型 |
 | `record_skill_outcome` | 记录技能使用效果 | 无 |
 | `update_skill` / `merge_skills` | 修正/合并技能 | 无 |
+| `export_skills` | 把本机技能导出为公开条目到 `skills/`（剥离证据图/反馈/置信度） | 无 |
 | `update_style_bible` | 人工修正（深合并） | 无 |
 | `plan_shots` | 写入分镜 | 无 |
 | `build_shot_prompt` | 生成并校验 H3 提示词 | 文本模型 |

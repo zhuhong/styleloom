@@ -13,6 +13,8 @@
 
 每次学习还会沉淀出**可迁移技能**——"这类镜头怎么运镜""雨夜街头怎么布光"——附带证据，置信度只由独立证据和真实反馈决定。久而久之，Agent 积累的是手艺，不只是提示词。
 
+技能还能以**只读公开库**的形式发布：仓库自带 `skills/` 目录存放可分享的知识（不含证据图、反馈与置信度），`export_skills` 能把本机可信技能导出为可分享条目。运行时 `search_skills` / `read_skill` 同时读取本机 `data/skills/` 与公开 `skills/`，id 冲突时本机覆盖。
+
 ```
 参考视频 ──ffmpeg──▶ 镜头切片 / 关键帧 / 参考片段
                         │
@@ -47,6 +49,8 @@
 [打开完整片段（MP4，9.4 秒，含音轨）](docs/assets/example-generated.mp4) —— 768×1344，固定机位一镜到底。
 
 完整记录：[参考图 + Ref2VA 示例](docs/examples/ref2va-with-stills-example.md)。
+
+第二次实战：120 秒小红书攀岩视频 → 16 镜学习 → 9 秒 Ref2VA 攀岩镜头。记录：[攀岩同款示例](docs/examples/xhs-climbing-example.md)。
 
 ## 为什么不是又一个视频 Agent
 
@@ -170,6 +174,7 @@ src/
 ├── store/                项目、manifest、会话、风格包、技能
 └── util/                 文件与 ffmpeg 原语
 web/                      无构建步骤的原生前端
+skills/                   公开只读技能库（仅知识，不含证据图）
 docs/                     技能、小红书下载、H3 提示词、示例
 ```
 
@@ -195,13 +200,15 @@ data/
 
 - 本地切片：12 秒 3 镜样本，切点检测、关键帧、采样、片段、音轨均正常。
 - 学习链路：`deepseek-v4.1-flash` 3 镜约 4 分钟，角色 / 场景 / 运镜 / 灯光 / 节奏输出可用。
-- 技能库：一次学习自动抽取 7 条技能，写入 `skill.json` + `SKILL.md` + 证据图；一次好评使 candidate → active（0.39 → 0.79）；中文词法检索命中。
+- 技能库：三次学习累计 24 条技能，写入 `skill.json` + `SKILL.md` + 证据图；真实好评使 candidate → active；中文词法检索命中。
 - Agent 工具链：经 LiteLLM 真实跑通 `read_learning_shots → update_brief → plan_shots → build_shot_prompt`，产出 6309 字符合法 Ref2VA 提示词。
 - 小红书下载：真实笔记（9.45 秒、720×1280、含音轨），短链 / URL / 分享文案解析与失败分支均验证。
 - 服务端、SSE、设置接口、项目文件访问、技能 API 与页面渲染。
 - 一次真实计费 H3 T2VA 出片：9 秒、9:16、768×1344、含音轨，排队+推理约 141 秒；VLM 三帧质检判定"高度符合"，仅有轻微机位漂移与手指/画框轻微融合。
+- 一次真实计费 H3 Ref2VA 出片：人物定妆照 + 空场景照两张参考图，9 秒、9:16、768×1344、含音轨，约 248 秒；VLM 质检判定身份/房间/构图"高度符合"，无裁切/漂移，仅手部与墙面开关面板有轻微偏差。
+- 第二条参考片（120 秒小红书攀岩视频，16 镜）：抽取 8 条技能；9 秒 Ref2VA 攀岩镜头约 248 秒出片，VLM 判定动作、身份、馆内布局"高度符合"；5 条运镜/灯光/色彩技能升为 active（0.80）。
 
-尚未验证：I2VA / FL2VA / Ref2VA 的真实出片（请求格式与 Toonflow provider 一致，T2VA 已跑通）。
+尚未验证：I2VA / FL2VA 的真实出片（请求格式与 Toonflow provider 一致，T2VA、Ref2VA 已跑通）。
 
 ## 已知限制
 
@@ -229,7 +236,7 @@ data/
 - [小红书下载](docs/xhs-download.md) —— 登录态与失败分支
 - [H3 提示词](docs/h3-prompting.md) —— 官方提示词结构
 - [架构说明](ARCHITECTURE.md) —— 请求生命周期与设计取舍
-- 示例：[风格圣经](docs/examples/style-bible-example.md) · [Ref2VA 提示词](docs/examples/ref2va-prompt-example.txt) · [技能](docs/examples/skill-example.md) · [真实出片](docs/examples/generated-shot-example.md)
+- 示例：[风格圣经](docs/examples/style-bible-example.md) · [Ref2VA 提示词](docs/examples/ref2va-prompt-example.txt) · [技能](docs/examples/skill-example.md) · [真实出片](docs/examples/generated-shot-example.md) · [Ref2VA 定妆照版](docs/examples/ref2va-with-stills-example.md) · [攀岩同款](docs/examples/xhs-climbing-example.md)
 
 ## 参与贡献
 

@@ -307,4 +307,21 @@ export type Skill = {
   mergedInto?: string;
   /** 人工指定状态后不再自动升降级 */
   statusLocked?: boolean;
+  /** 来源：public=仓库公开技能库（只读）；local=本机累积（默认）。 */
+  source?: "public" | "local";
+};
+
+/** 公开技能库条目：随仓库分发的知识，不含证据图、反馈与置信度等私有/版权字段。 */
+export type PublicSkill = {
+  id: string;
+  name: string;
+  kind: SkillKind;
+  summaryZh: string;
+  instruction: string;
+  promptFragment: string;
+  applicableWhen: string[];
+  avoidWhen: string[];
+  tags: string[];
+  version: number;
+  createdAt?: string;
 };

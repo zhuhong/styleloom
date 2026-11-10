@@ -10,6 +10,7 @@
 | 风格圣经 | 项目 | 角色身份、场景、运镜语法、节奏、灯光、声音 | `data/projects/<id>/learning/styleBible.json` |
 | 风格包 | 跨项目 | 某部参考片的完整风格圣经 + 引用素材 | `data/library/packs/<id>.json` |
 | 技能 | 跨项目 | 可执行方法、H3 prompt fragment、证据、使用反馈 | `data/skills/<id>/` |
+| 公开技能 | 跨项目（开源共享） | 只读知识：kind/name/instruction/promptFragment/适用与避免条件 | `skills/<id>/` |
 
 角色定妆照、场景照仍然属于某个参考片（风格包）；技能只沉淀「怎么拍、怎么写提示词、怎么避坑」。
 
@@ -47,6 +48,32 @@ data/skills/<id>/
 一次好评后：`confidence` 0.79、`status` active、`outcomes` 增加 `good` 记录。
 
 `kind`：`camera` / `lighting` / `color` / `composition` / `rhythm` / `prompt` / `sound` / `workflow` / `avoid`。
+
+## 公开技能库 `skills/`
+
+公开技能是把本机沉淀的方法**开源共享**出去的只读层，与 `data/skills/` 并存：
+
+- **不含**证据图（第三方素材版权）、使用反馈、置信度、统计；只保留可分发知识字段。
+- 运行时 `search_skills` / `read_skill` 会**合并**本机 `data/skills/` 与公开 `skills/`；同 id 时**本机覆盖公开**。
+- 公开条目 hydrate 成默认 `status: candidate` / `confidence: 0.32`，`source: "public"`，**只读、不记反馈**；在本机采纳并产生真实反馈后才在本机累积置信度。
+- 用 `export_skills` 把本机一条技能导出成公开条目（`--dryRun` 预览，`--overwrite` 覆盖）。
+- 贡献前检查 `SKILL.md`：**不要出现本机绝对路径、小红书笔记 id 或可识别参考片作者的信息**。
+
+```json
+// skills/<id>/skill.json —— 公开字段（无 evidence/outcomes/confidence/stats/status）
+{
+  "id": "camera-46a40acd",
+  "name": "固定机位平视双人对话镜",
+  "kind": "camera",
+  "summaryZh": "对话场景用完全静止的平视中景双人镜……",
+  "instruction": "当场景核心是两人之间的言语博弈而非动作时……",
+  "promptFragment": "locked-off static camera, eye-level medium two-shot ...",
+  "applicableWhen": ["两人对话、谈判或对峙场景"],
+  "avoidWhen": ["动作戏或追逐段落"],
+  "tags": ["固定机位", "双人镜", "平视", "中景", "写实"],
+  "version": 1
+}
+```
 
 ## 自动积累流程
 
@@ -114,3 +141,4 @@ LLM 的自评 confidence 只用于候选排序，**不会**直接抬高置信度
 | `record_skill_outcome` | 记录好/一般/差 |
 | `update_skill` | 修正内容或状态 |
 | `merge_skills` | 合并重复技能 |
+| `export_skills` | 把本机技能导出为公开条目（剥离证据/反馈/置信度） |

@@ -13,6 +13,8 @@ Most video generators start from a prompt and hope. StyleLoom starts from a refe
 
 Every study session also produces **portable skills** — "how to move the camera", "how to light a rainy street" — stored with evidence and scored only by independent evidence and real human feedback. Over time the agent accumulates craft, not just prompts.
 
+Skills can also be **published as a read-only public library**. The repo ships a `skills/` directory of shareable knowledge — no evidence images, no feedback, no confidence — and `export_skills` turns a trusted local skill into a shareable entry. At runtime `search_skills` / `read_skill` read both your local `data/skills/` and the public `skills/`, with the local copy winning on an id collision.
+
 ```
 reference video ──ffmpeg──▶ shots / keyframes / reference clips
                               │
@@ -48,6 +50,8 @@ One 9.4-second vertical reference clip, studied once, then rendered twice. The t
 [Open the full clip (MP4, 9.4 s, with audio)](docs/assets/example-generated.mp4) — 768×1344, one fixed camera, no cuts.
 
 Full write-up: [reference stills + Ref2VA example](docs/examples/ref2va-with-stills-example.md).
+
+Second run: a 120-second Xiaohongshu climbing video → 16-shot study → 9-second Ref2VA climbing shot. Write-up: [climbing example](docs/examples/xhs-climbing-example.md).
 
 ## Why another video agent
 
@@ -173,6 +177,7 @@ src/
 ├── store/                projects, manifests, sessions, style packs, skills
 └── util/                 fs and ffmpeg primitives
 web/                      dependency-free HTML/CSS/JS front end
+skills/                    public read-only skill library (knowledge only, no evidence images)
 docs/                     skills, xhs download, H3 prompting, examples
 ```
 
@@ -198,13 +203,15 @@ Verified end to end:
 
 - Local slicing on a 12-second / 3-shot sample: scene detection, keyframes, samples, clips, audio.
 - Study pipeline with `deepseek-v4.1-flash`: 3 shots in ~4 minutes, usable characters / locations / camera / lighting / rhythm output.
-- Skill library: 7 skills auto-extracted from one study, written to `skill.json` + `SKILL.md` + evidence images; one positive review moved a candidate to `active` (0.39 → 0.79); Chinese lexical search hits.
+- Skill library: 24 skills across three studies, written to `skill.json` + `SKILL.md` + evidence images; positive outcomes promote candidates to `active`; Chinese lexical search hits.
 - Agent tool chain through LiteLLM: `read_learning_shots → update_brief → plan_shots → build_shot_prompt` produced a valid 6309-character Ref2VA prompt.
 - Xiaohongshu download with a real note (9.45s, 720×1280, with audio), including short-link/URL/share-text parsing and failure branches.
 - Server, SSE, settings API, project file access, skills API, front-end rendering.
 - One real billed H3 T2VA render: 9s, 9:16, 768×1344, with audio, ~141s queue+inference; a VLM three-frame check rated it "highly consistent" with minor camera drift and a slight finger/frame fusion.
+- One real billed H3 Ref2VA render from a character still + an empty location still: 9s, 9:16, 768×1344, with audio, ~248s; the VLM check rated identity, room and framing "highly consistent", with no crop or drift and only minor hand/switch-panel artifacts.
+- A second reference (120s Xiaohongshu climbing video, 16 shots): 8 skills extracted; a 9s Ref2VA climbing shot rendered in ~248s and rated "highly consistent" for action, identity and gym layout; five camera/lighting/color skills moved to `active` (0.80).
 
-Not yet verified: real I2VA / FL2VA / Ref2VA renders (request shape mirrors the Toonflow provider; T2VA is proven).
+Not yet verified: real I2VA / FL2VA renders (request shape mirrors the Toonflow provider; T2VA and Ref2VA are proven).
 
 ## Limitations
 
@@ -232,7 +239,7 @@ Not yet verified: real I2VA / FL2VA / Ref2VA renders (request shape mirrors the 
 - [Xiaohongshu download](docs/xhs-download.md) — login state, failure modes
 - [H3 prompting](docs/h3-prompting.md) — official prompt structure
 - [Architecture](ARCHITECTURE.md) — request lifecycle and design rationale
-- Examples: [style bible](docs/examples/style-bible-example.md) · [Ref2VA prompt](docs/examples/ref2va-prompt-example.txt) · [skill](docs/examples/skill-example.md) · [generated shot](docs/examples/generated-shot-example.md)
+- Examples: [style bible](docs/examples/style-bible-example.md) · [Ref2VA prompt](docs/examples/ref2va-prompt-example.txt) · [skill](docs/examples/skill-example.md) · [generated shot](docs/examples/generated-shot-example.md) · [Ref2VA with stills](docs/examples/ref2va-with-stills-example.md) · [climbing shot](docs/examples/xhs-climbing-example.md)
 
 ## Contributing
 
