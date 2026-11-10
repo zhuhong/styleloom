@@ -1,3 +1,5 @@
+**English** · [简体中文版](README.zh-CN.md)
+
 # StyleLoom
 
 **A video-generation agent that learns from reference footage — then shoots something new in that style.**
@@ -6,8 +8,6 @@
 ![Runtime: Bun](https://img.shields.io/badge/runtime-Bun%201.3%2B-black)
 ![Runtime deps: 0](https://img.shields.io/badge/runtime%20deps-0-brightgreen)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-orange)
-
-English · [简体中文](README.zh-CN.md)
 
 Most video generators start from a prompt and hope. StyleLoom starts from a reference video you already trust: it cuts the footage into shots, has a vision model annotate every shot frame by frame, distills that into a structured **style bible** (identity, wardrobe, art direction, camera grammar, rhythm, lighting, sound), and then drives MiniMax H3 to generate new shots from those constraints.
 

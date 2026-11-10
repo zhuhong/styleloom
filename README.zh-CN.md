@@ -1,3 +1,5 @@
+[English](README.md) · **简体中文版**
+
 # StyleLoom
 
 **一个会从参考片里学习的视频生成 Agent —— 学完再拍一个同样风格的新片。**
@@ -6,8 +8,6 @@
 ![Runtime: Bun](https://img.shields.io/badge/runtime-Bun%201.3%2B-black)
 ![Runtime deps: 0](https://img.shields.io/badge/runtime%20deps-0-brightgreen)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-orange)
-
-[English](README.md) · 简体中文
 
 大多数视频生成工具从一句提示词开始，然后祈祷。StyleLoom 从一段你认可的参考片开始：切镜、逐帧拉片，把画面归纳成结构化的**风格圣经**（身份与服装、场景美术、运镜语法、节奏、灯光、声音），再用这些约束驱动 MiniMax H3 生成新镜头。
 
