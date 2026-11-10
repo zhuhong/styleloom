@@ -1,6 +1,7 @@
 import { copyFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Project, Skill, SkillDraft, SkillEvidence, SliceManifest, StyleBible } from "../types";
+import { normalizeStyleBible } from "./bible";
 import { chatJson } from "../providers/llm";
 import { ensureDir, exists, nowIso } from "../util/fs";
 import { projectDir } from "../store/projects";
@@ -119,6 +120,7 @@ function fallbackDrafts(bible: StyleBible, manifest: SliceManifest): SkillDraft[
 }
 
 function compactBible(bible: StyleBible) {
+  bible = normalizeStyleBible(bible);
   return {
     summary: bible.summary,
     style: bible.style,

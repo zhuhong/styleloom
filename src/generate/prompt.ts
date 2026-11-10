@@ -2,6 +2,7 @@ import type { Project, PromptMode, ShotPlan, StyleBible } from "../types";
 import { chat } from "../providers/llm";
 import { loadSettings } from "../config";
 import { getManifest } from "../store/projects";
+import { normalizeStyleBible } from "../learn/bible";
 
 export type ReferenceImage = { path: string; label: string; role: "subject" | "location" };
 export type ReferenceVideo = { path: string; label: string; shotId: string };
@@ -15,12 +16,12 @@ export type PreparedReferences = {
 };
 
 function characterStill(character: NonNullable<StyleBible["characters"]>[number]) {
-  return character.stillImages[0] ?? character.refImages[0];
+  return character.stillImages?.[0] ?? character.refImages?.[0];
 }
 
 /** 依据分镜与学习成果决定 H3 生成模式，并准备参考素材。 */
 export async function prepareReferences(project: Project, shot: ShotPlan): Promise<PreparedReferences> {
-  const bible = project.styleBible;
+  const bible = project.styleBible ? normalizeStyleBible(project.styleBible) : undefined;
   const images: ReferenceImage[] = [];
   if (bible) {
     for (const characterId of shot.characterIds) {
@@ -30,7 +31,7 @@ export async function prepareReferences(project: Project, shot: ShotPlan): Promi
     }
     if (shot.locationId) {
       const location = bible.locations.find(item => item.id === shot.locationId);
-      const path = location ? location.stillImages[0] ?? location.refImages[0] : undefined;
+      const path = location ? location.stillImages?.[0] ?? location.refImages?.[0] : undefined;
       if (location && path) images.push({ path, label: location.promptEn, role: "location" });
     }
   }

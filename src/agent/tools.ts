@@ -16,6 +16,7 @@ import { composeShotPrompt, prepareReferences } from "../generate/prompt";
 import { downloadXhsVideo, extractUrlFromText, isXhsUrl } from "../providers/download/xhs";
 import { exportPublicSkill, mergeSkills, readSkillResolved, recordSkillOutcome, searchSkills, skillToSummary, updateSkill } from "../store/skills";
 import { extractSkillsFromStudy } from "../learn/skills";
+import { normalizeStyleBible } from "../learn/bible";
 
 export type ToolContext = {
   project: Project;
@@ -87,6 +88,7 @@ async function downloadToCache(url: string, signal: AbortSignal) {
 }
 
 function compactBible(bible: StyleBible) {
+  bible = normalizeStyleBible(bible);
   return {
     summary: bible.summary,
     style: bible.style,
@@ -98,7 +100,7 @@ function compactBible(bible: StyleBible) {
       wardrobe: character.wardrobe,
       refShotIds: character.refShotIds,
       refImages: character.refImages,
-      stillImages: character.stillImages,
+      stillImages: character.stillImages ?? [],
       stillPrompt: character.stillPrompt,
     })),
     locations: bible.locations.map(location => ({
@@ -108,7 +110,7 @@ function compactBible(bible: StyleBible) {
       promptEn: location.promptEn,
       refShotIds: location.refShotIds,
       refImages: location.refImages,
-      stillImages: location.stillImages,
+      stillImages: location.stillImages ?? [],
       stillPrompt: location.stillPrompt,
     })),
     cameraGrammar: bible.cameraGrammar,
@@ -510,7 +512,7 @@ async function readShots(ctx: ToolContext) {
 async function updateBible(ctx: ToolContext, args: Args) {
   if (!ctx.project.styleBible) return { ok: false, error: "当前项目还没有风格圣经" };
   const patch = record(args.patch);
-  ctx.project.styleBible = deepMerge(structuredClone(ctx.project.styleBible) as unknown as Args, patch) as unknown as StyleBible;
+  ctx.project.styleBible = normalizeStyleBible(deepMerge(structuredClone(ctx.project.styleBible) as unknown as Args, patch) as unknown as StyleBible);
   await Bun.write(join(projectDir(ctx.project.id), "learning", "styleBible.json"), `${JSON.stringify(ctx.project.styleBible, null, 2)}\n`);
   await ctx.save();
   return { ok: true, bible: compactBible(ctx.project.styleBible) };

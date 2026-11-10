@@ -9,13 +9,13 @@ function learningSnapshot(project: Project) {
   }
   return `学习状态：${project.learning.status}${project.learning.warning ? `（警告：${project.learning.warning}）` : ""}
 风格圣经：${bible.summary}
-风格前缀：${bible.style.stylePrefix}
-角色：${bible.characters.map(character => `${character.id}=${character.name}（参考镜头 ${character.refShotIds.join("/") || "-"}，定妆图 ${character.stillImages.length} 张）`).join("；") || "无"}
-场景：${bible.locations.map(location => `${location.id}=${location.name}（参考镜头 ${location.refShotIds.join("/") || "-"}）`).join("；") || "无"}
-运镜语法：${bible.cameraGrammar.map(move => `${move.name}（例 ${move.exampleShotIds.join("/") || "-"}）`).join("；") || "无"}
-节奏：平均 ${bible.rhythm.averageShotSeconds} 秒/镜头；${bible.rhythm.cutPattern}
-一致性锚点：${bible.prompting.consistencyAnchors.join("；") || "-"}
-必须避免：${bible.prompting.avoid.join("；") || "-"}`;
+风格前缀：${bible.style?.stylePrefix ?? "-"}
+角色：${bible.characters?.map(character => `${character.id}=${character.name}（参考镜头 ${character.refShotIds?.join("/") || "-"}，定妆图 ${character.stillImages?.length ?? 0} 张）`).join("；") || "无"}
+场景：${bible.locations?.map(location => `${location.id}=${location.name}（参考镜头 ${location.refShotIds?.join("/") || "-"}）`).join("；") || "无"}
+运镜语法：${bible.cameraGrammar?.map(move => `${move.name}（例 ${move.exampleShotIds?.join("/") || "-"}）`).join("；") || "无"}
+节奏：平均 ${bible.rhythm?.averageShotSeconds ?? "-"} 秒/镜头；${bible.rhythm?.cutPattern ?? "-"}
+一致性锚点：${bible.prompting?.consistencyAnchors?.join("；") || "-"}
+必须避免：${bible.prompting?.avoid?.join("；") || "-"}`;
 }
 
 function planSnapshot(project: Project) {

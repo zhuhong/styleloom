@@ -3,6 +3,7 @@ import { extname, join } from "node:path";
 import type { Project } from "../types";
 import type { Settings } from "../config";
 import { addAsset, projectDir, saveProject } from "../store/projects";
+import { normalizeStyleBible } from "../learn/bible";
 import { ensureDir, exists, safeJoin, stamp } from "../util/fs";
 import { generateImageWithModel } from "../providers/image";
 
@@ -29,6 +30,7 @@ export async function generateStill(options: {
   signal?: AbortSignal;
 }): Promise<StillResult> {
   const { project, settings, target, id } = options;
+  if (project.styleBible) project.styleBible = normalizeStyleBible(project.styleBible);
   const bible = project.styleBible;
   if (!bible) throw new Error("还没有风格圣经，请先学习参考视频或套用风格包");
   const sheet = target === "character" ? bible.characters.find(item => item.id === id) : bible.locations.find(item => item.id === id);
@@ -49,7 +51,7 @@ export async function generateStill(options: {
     const extension = image.mimeType.includes("png") ? ".png" : image.mimeType.includes("webp") ? ".webp" : ".jpg";
     const relative = `assets/stills/${target}-${id}-${stamp()}${extension}`;
     await writeFile(join(root, relative), image.bytes);
-    sheet.stillImages = [...new Set([relative, ...sheet.stillImages])].slice(0, 4);
+    sheet.stillImages = [...new Set([relative, ...(sheet.stillImages ?? [])])].slice(0, 4);
     addAsset(project, { kind: "still", path: relative, label: `${target === "character" ? "定妆照" : "场景照"} ${sheet.name}`, meta: { target, id, model: image.model, prompt } });
     await saveProject(project);
     return { target, id, path: relative, source: "model" };
@@ -62,7 +64,7 @@ export async function generateStill(options: {
   const extension = extname(fallback) || ".jpg";
   const relative = `assets/stills/${target}-${id}-reference${extension}`;
   await copyFile(source, join(root, relative));
-  sheet.stillImages = [...new Set([relative, ...sheet.stillImages])].slice(0, 4);
+  sheet.stillImages = [...new Set([relative, ...(sheet.stillImages ?? [])])].slice(0, 4);
   addAsset(project, { kind: "still", path: relative, label: `${target === "character" ? "参考定妆" : "参考场景"} ${sheet.name}`, meta: { target, id, source: "reference", from: fallback } });
   await saveProject(project);
   return {

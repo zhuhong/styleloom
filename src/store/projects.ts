@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { dataDir } from "../config";
 import type { AssetRecord, LearningState, Project, ProjectSummary, SliceManifest } from "../types";
+import { normalizeStyleBible } from "../learn/bible";
 import { exists, ensureDir, listDirs, nowIso, readJsonIfExists, slugify, writeJson } from "../util/fs";
 
 export function projectsDir() {
@@ -74,10 +75,12 @@ export async function getProject(id: string): Promise<Project> {
   project.plan ??= [];
   project.assets ??= [];
   project.learning ??= emptyLearning();
+  if (project.styleBible) project.styleBible = normalizeStyleBible(project.styleBible);
   return project;
 }
 
 export async function saveProject(project: Project) {
+  if (project.styleBible) project.styleBible = normalizeStyleBible(project.styleBible);
   project.updatedAt = nowIso();
   await writeJson(projectFile(project.id), project);
   return project;
