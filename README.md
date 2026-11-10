@@ -35,6 +35,20 @@ reference video ──ffmpeg──▶ shots / keyframes / reference clips
                    icompify / MiniMax H3 renders the video
 ```
 
+## Example
+
+One 9.4-second vertical reference clip, studied once, then rendered. The source footage is third-party and features a real person, so it is **not** redistributed here — what follows is the art direction the models derived from it, and the shot they produced.
+
+| Learned art direction (AI still) | Generated shot (AI) |
+| :---: | :---: |
+| <img src="docs/assets/example-location.jpg" width="210" alt="AI-generated empty set derived from the reference"> | <img src="docs/assets/example-generated-frame.jpg" width="210" alt="Generated shot"> |
+
+![Generated shot preview](docs/assets/example-generated.gif)
+
+[Open the full clip (MP4, 9.4 s, with audio)](docs/assets/example-generated.mp4) — 768×1344, one fixed camera, no cuts.
+
+Full write-up: [reference stills + Ref2VA example](docs/examples/ref2va-with-stills-example.md).
+
 ## Why another video agent
 
 - **Structured beats similar.** A shot needs executable constraints — identity anchors, wardrobe, set layout, camera move amplitude and speed, light direction. Those go straight into an H3 prompt and stay readable by humans, so you can correct them.

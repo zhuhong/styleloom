@@ -34,6 +34,20 @@
               icompify / MiniMax H3 生成视频
 ```
 
+## 示例
+
+一段 9.4 秒的竖屏参考片，学习一次后出片。原片属于第三方且含真人，**不随仓库分发**；下面展示的是模型从中学到的美术方向，以及据此生成的镜头。
+
+| 学到的美术方向（AI 静帧） | 生成的镜头（AI） |
+| :---: | :---: |
+| <img src="docs/assets/example-location.jpg" width="210" alt="从参考片归纳出的空场景 AI 静帧"> | <img src="docs/assets/example-generated-frame.jpg" width="210" alt="生成镜头截帧"> |
+
+![生成镜头预览](docs/assets/example-generated.gif)
+
+[打开完整片段（MP4，9.4 秒，含音轨）](docs/assets/example-generated.mp4) —— 768×1344，固定机位一镜到底。
+
+完整记录：[参考图 + Ref2VA 示例](docs/examples/ref2va-with-stills-example.md)。
+
 ## 为什么不是又一个视频 Agent
 
 - **结构化胜过相似度。** 一个镜头需要的是可执行约束：身份锚点、服装、场景布局、运镜类型与幅度速度、光线方向。这些字段直接进 H3 提示词，同时人也能读懂、能改。
