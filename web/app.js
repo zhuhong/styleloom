@@ -8,6 +8,10 @@ const state = {
   streaming: false,
   toolCards: new Map(),
   refreshTimer: null,
+  inspectorTab: null,
+  assetFilter: "all",
+  skillFilter: "all",
+  showAllSkills: false,
 };
 
 const els = {
@@ -82,6 +86,37 @@ function mediaTypeForPath(path) {
 function formatSeconds(value) {
   const number = Number(value ?? 0);
   return `${number.toFixed(number % 1 === 0 ? 0 : 2)}s`;
+}
+
+function formatUpdatedAt(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function skillStatusLabel(status) {
+  return status === "active" ? "生效" : status === "candidate" ? "候选" : status === "deprecated" ? "停用" : status;
+}
+
+function skillKindLabel(kind) {
+  const labels = { camera: "运镜", lighting: "灯光", color: "色彩", composition: "构图", rhythm: "节奏", prompt: "提示词", sound: "声音", workflow: "流程", avoid: "避坑" };
+  return labels[kind] || kind;
+}
+
+function shotStatusLabel(status) {
+  const labels = { planned: "待生成", promptReady: "提示词就绪", generating: "生成中", done: "已完成", failed: "失败" };
+  return labels[status] || status;
+}
+
+function learningStateLabel(learning) {
+  if (learning.status === "done" && learning.warning) return "已完成 · 有提示";
+  return learningLabels[learning.status] || learning.status;
+}
+
+function readableLearningWarning(warning) {
+  if (!warning) return "";
+  if (warning.includes("返回内容不是 JSON")) return "风格归纳使用规则版回退；可重新学习或手动修正风格圣经。";
+  return warning;
 }
 
 function resetMediaDialog() {
@@ -262,32 +297,216 @@ function renderHistory(messages) {
   for (const message of messages) addBubble(message.role, message.content);
 }
 
-function renderSkills() {
-  if (!state.skills.length) {
-    return `<div class="inspectorSection">
-      <h3>技能库 <span class="count">0</span></h3>
-      <p class="muted" style="font-size:12px">学习参考片后自动积累；生成后反馈效果会调整置信度。</p>
-    </div>`;
-  }
-  return `<div class="inspectorSection">
-    <h3>技能库 <span class="count">${state.skills.length}</span></h3>
-    ${state.skills.slice(0, 12).map(skill => `<details class="skillCard">
-      <summary>
-        <span class="skillName">${escapeHtml(skill.name)}</span>
-        <span class="skillKind">${escapeHtml(skill.kind)}</span>
-        <span class="skillConfidence">${Number(skill.confidence).toFixed(2)}</span>
-      </summary>
-      <p>${escapeHtml(skill.summaryZh)}</p>
-      ${(skill.applicableWhen || []).length ? `<div class="chips">${skill.applicableWhen.map(item => `<span class="chip">${escapeHtml(item)}</span>`).join("")}</div>` : ""}
-      ${skill.instruction ? `<p class="skillInstruction">${escapeHtml(skill.instruction)}</p>` : ""}
-      ${skill.promptFragment ? `<pre>${escapeHtml(skill.promptFragment)}</pre>` : ""}
-      ${(skill.images || []).length ? `<div class="thumbs">${skill.images.map(image => {
-        const src = skillFileUrl(skill.id, image);
-        return `<a class="mediaThumb" href="${src}" data-media-src="${src}" data-media-type="image" data-media-title="${escapeHtml(skill.name)} · 证据" target="_blank" rel="noreferrer"><img loading="lazy" src="${src}" alt="${escapeHtml(skill.name)}" /></a>`;
-      }).join("")}</div>` : ""}
-      <p class="skillStats">${escapeHtml(skill.status)} · 证据 ${skill.evidenceCount} · 使用 ${skill.used} · 好评 ${skill.good} / 一般 ${skill.mixed} / 差评 ${skill.bad}</p>
-    </details>`).join("")}
+function renderEntity(project, entity, kind) {
+  const images = entity.stillImages || [];
+  const imageLabel = kind === "character" ? "定妆照" : "场景照";
+  return `<div class="entity">
+    <div class="entityHead"><b>${escapeHtml(entity.name)}</b><span>${escapeHtml(entity.id)}</span></div>
+    <p>${escapeHtml(entity.descriptionZh)}</p>
+    ${images.length ? `<div class="thumbs">${images.slice(0, 3).map(path => {
+      const src = fileUrl(project.id, path);
+      return `<a class="mediaThumb" href="${src}" data-media-src="${src}" data-media-type="image" data-media-title="${escapeHtml(entity.name)} · ${imageLabel}" target="_blank" rel="noreferrer"><img src="${src}" alt="${escapeHtml(entity.name)}" /></a>`;
+    }).join("")}</div>` : ""}
   </div>`;
+}
+
+function renderSkillCard(skill) {
+  return `<details class="skillCard">
+    <summary>
+      <span class="skillName">${escapeHtml(skill.name)}</span>
+      <span class="skillKind">${escapeHtml(skillKindLabel(skill.kind))}</span>
+      <span class="skillConfidence">${Number(skill.confidence).toFixed(2)}</span>
+    </summary>
+    <p>${escapeHtml(skill.summaryZh)}</p>
+    ${(skill.applicableWhen || []).length ? `<div class="chips">${skill.applicableWhen.map(item => `<span class="chip">${escapeHtml(item)}</span>`).join("")}</div>` : ""}
+    ${skill.instruction ? `<p class="skillInstruction">${escapeHtml(skill.instruction)}</p>` : ""}
+    ${skill.promptFragment ? `<pre>${escapeHtml(skill.promptFragment)}</pre>` : ""}
+    ${(skill.images || []).length ? `<div class="thumbs">${skill.images.map(image => {
+      const src = skillFileUrl(skill.id, image);
+      return `<a class="mediaThumb" href="${src}" data-media-src="${src}" data-media-type="image" data-media-title="${escapeHtml(skill.name)} · 证据" target="_blank" rel="noreferrer"><img loading="lazy" src="${src}" alt="${escapeHtml(skill.name)}" /></a>`;
+    }).join("")}</div>` : ""}
+    <p class="skillStats"><span class="statusDot ${escapeHtml(skill.status)}"></span>${escapeHtml(skillStatusLabel(skill.status))} · 证据 ${skill.evidenceCount} · 使用 ${skill.used} · 好评 ${skill.good} / 一般 ${skill.mixed} / 差评 ${skill.bad}</p>
+  </details>`;
+}
+
+function renderSkills() {
+  const all = state.skills || [];
+  if (!all.length) {
+    return `<section class="inspectorSection">
+      <div class="sectionHead"><h3>技能库</h3><span class="count">0</span></div>
+      <p class="emptyHint">学习参考片后自动积累；生成后反馈效果会调整置信度。</p>
+    </section>`;
+  }
+  const counts = {
+    all: all.length,
+    active: all.filter(skill => skill.status === "active").length,
+    candidate: all.filter(skill => skill.status === "candidate").length,
+    deprecated: all.filter(skill => skill.status === "deprecated").length,
+  };
+  const filters = [
+    ["all", "全部", counts.all],
+    ["active", "生效", counts.active],
+    ["candidate", "候选", counts.candidate],
+    ["deprecated", "停用", counts.deprecated],
+  ].filter(([, , count]) => count > 0);
+  const filter = filters.some(([value]) => value === state.skillFilter) ? state.skillFilter : "all";
+  const filtered = all
+    .filter(skill => filter === "all" || skill.status === filter)
+    .sort((left, right) => {
+      const rank = status => status === "active" ? 0 : status === "candidate" ? 1 : 2;
+      return rank(left.status) - rank(right.status) || Number(right.confidence) - Number(left.confidence);
+    });
+  const visible = state.showAllSkills ? filtered : filtered.slice(0, 8);
+  return `<section class="inspectorSection">
+    <div class="sectionHead"><h3>技能库</h3><span class="count">${filter === "all" ? all.length : `${filtered.length} / ${all.length}`}</span></div>
+    <div class="filterChips">${filters.map(([value, label, count]) => `<button class="filterChip ${filter === value ? "active" : ""}" data-skill-filter="${value}">${label}<span>${count}</span></button>`).join("")}</div>
+    <p class="sectionHint">按 生效 → 候选 排序，置信度 0–1（越高越可信）。</p>
+    ${visible.length ? visible.map(renderSkillCard).join("") : `<p class="emptyHint">没有这个状态的技能。</p>`}
+    ${filtered.length > 8 ? `<button class="textButton" data-show-all-skills>${state.showAllSkills ? "收起" : `显示全部 ${filtered.length} 条`}</button>` : ""}
+  </section>`;
+}
+
+function renderOverview(project, shots, bible, brief, learning) {
+  const parts = [];
+  parts.push(`<section class="inspectorSection">
+    <div class="sectionHead"><h3>需求</h3></div>
+    <div class="briefCard">
+      <p class="briefIdea">${brief.idea ? escapeHtml(brief.idea) : '<span class="muted">还没有记录需求</span>'}</p>
+      <div class="metaGrid">
+        <div><b>类型</b><span title="${escapeHtml(brief.genre || "-")}">${escapeHtml(brief.genre || "-")}</span></div>
+        <div><b>画幅</b><span title="${escapeHtml(brief.aspectRatio || "-")}">${escapeHtml(brief.aspectRatio || "-")}</span></div>
+        <div><b>目标时长</b><span title="${brief.durationSeconds ? `${brief.durationSeconds} 秒` : "-"}">${brief.durationSeconds ? `${brief.durationSeconds} 秒` : "-"}</span></div>
+      </div>
+      ${((brief.mustKeep || []).length + (brief.avoid || []).length) ? `<details class="fold">
+        <summary>约束 <span class="count">${(brief.mustKeep || []).length + (brief.avoid || []).length} 条</span></summary>
+        <div class="chips">
+          ${(brief.mustKeep || []).map(item => `<span class="chip">保留：${escapeHtml(item)}</span>`).join("")}
+          ${(brief.avoid || []).map(item => `<span class="chip">避免：${escapeHtml(item)}</span>`).join("")}
+        </div>
+      </details>` : ""}
+    </div>
+  </section>`);
+
+  const resolution = learning.sourceWidth && learning.sourceHeight ? `${learning.sourceWidth}×${learning.sourceHeight}` : "";
+  parts.push(`<section class="inspectorSection">
+    <div class="sectionHead"><h3>学习状态</h3><span class="count">${escapeHtml(learningStateLabel(learning))}</span></div>
+    ${learning.error ? `<p class="inlineWarning error">${escapeHtml(learning.error)}</p>` : ""}
+    ${learning.warning ? `<p class="inlineWarning warn">${escapeHtml(readableLearningWarning(learning.warning))}</p>` : ""}
+    <div class="statRow">
+      <span class="stat"><b>${learning.shotCount ?? 0}</b>参考镜头</span>
+      ${learning.sourceDuration ? `<span class="stat"><b>${formatSeconds(learning.sourceDuration)}</b>时长</span>` : ""}
+      ${resolution ? `<span class="stat"><b>${escapeHtml(resolution)}</b>分辨率</span>` : ""}
+    </div>
+    ${shots.length ? `<details class="fold">
+      <summary>参考镜头 <span class="count">${shots.length} 个</span></summary>
+      <div class="shotGrid">${shots.map(shot => `
+        <div class="shotCard">
+          <a class="mediaThumb" href="${fileUrl(project.id, shot.keyframe)}" data-media-src="${fileUrl(project.id, shot.keyframe)}" data-media-type="image" data-media-title="${escapeHtml(shot.id)} 关键帧" target="_blank" rel="noreferrer"><img loading="lazy" src="${fileUrl(project.id, shot.keyframe)}" alt="${escapeHtml(shot.id)}" /></a>
+          <div class="shotMeta"><strong>${escapeHtml(shot.id)} · ${formatSeconds(shot.duration)}</strong>${escapeHtml(shot.shotSize || "-")} · ${escapeHtml((shot.movement || "").slice(0, 42))}</div>
+        </div>`).join("")}</div>
+    </details>` : `<p class="emptyHint">还没有参考镜头。</p>`}
+  </section>`);
+
+  if (!bible) {
+    parts.push(`<p class="emptyHint">还没有风格圣经。学习参考片后会自动生成角色、场景与运镜。</p>`);
+    return parts.join("");
+  }
+
+  const characters = bible.characters || [];
+  const locations = bible.locations || [];
+  const moves = bible.cameraGrammar || [];
+  parts.push(`<section class="inspectorSection">
+    <div class="sectionHead"><h3>风格圣经</h3><span class="count">${escapeHtml(bible.rhythm?.averageShotSeconds ?? "-")}s/镜</span></div>
+    <div class="bibleCard">
+      <p class="bibleSummary">${escapeHtml(bible.summary)}</p>
+      <div class="chips">
+        ${characters.map(character => `<span class="chip">角色 · ${escapeHtml(character.name)}</span>`).join("")}
+        ${locations.map(location => `<span class="chip">场景 · ${escapeHtml(location.name)}</span>`).join("")}
+      </div>
+      ${characters.length || locations.length ? `<details class="fold">
+        <summary>角色与场景 <span class="count">${characters.length + locations.length} 项</span></summary>
+        ${characters.map(character => renderEntity(project, character, "character")).join("")}
+        ${locations.map(location => renderEntity(project, location, "location")).join("")}
+      </details>` : ""}
+      ${moves.length ? `<details class="fold">
+        <summary>运镜语法 <span class="count">${moves.length} 条</span></summary>
+        <ul class="cameraList">${moves.map(move => `<li><b>${escapeHtml(move.name)}</b><span>${escapeHtml(move.descriptionZh || move.promptFragment || "")}</span></li>`).join("")}</ul>
+      </details>` : ""}
+      ${bible.style?.stylePrefix ? `<details class="fold">
+        <summary>风格前缀</summary>
+        <p class="stylePrefix">${escapeHtml(bible.style.stylePrefix)}</p>
+      </details>` : ""}
+    </div>
+  </section>`);
+  return parts.join("");
+}
+
+function renderPlan(project) {
+  const plan = project.plan || [];
+  if (!plan.length) {
+    return `<section class="inspectorSection">
+      <div class="sectionHead"><h3>分镜</h3><span class="count">0</span></div>
+      <p class="emptyHint">还没有分镜。先在左侧对话里描述想法，让 Agent 规划镜头。</p>
+    </section>`;
+  }
+  return `<section class="inspectorSection">
+    <div class="sectionHead"><h3>分镜</h3></div>
+    <p class="sectionHint">点击视频封面，在弹窗里播放。</p>
+    ${plan.map(shot => {
+      const videoUrl = shot.video ? fileUrl(project.id, shot.video) : "";
+      const preview = shot.video
+        ? (project.assets || []).find(asset => asset.kind === "frame" && asset.meta?.shotId === shot.id && (asset.label.includes("预览") || asset.path.includes("preview")))
+        : undefined;
+      const posterUrl = preview ? fileUrl(project.id, preview.path) : "";
+      return `<div class="planRow">
+        <div class="planBody">
+          <div class="planMiniMedia">
+            ${shot.video ? `<button class="videoPoster mini" type="button" data-media-src="${videoUrl}" data-media-type="video" data-media-title="${escapeHtml(`${shot.id} ${shot.title}`)}" data-media-open="${videoUrl}" aria-label="弹窗预览 ${escapeHtml(shot.id)}"><video muted preload="metadata" playsinline ${posterUrl ? `poster="${posterUrl}"` : ""} src="${videoUrl}"></video><span class="playBadge"><span>▶</span></span></button>` : `<div class="planPlaceholder mini">${shot.status === "generating" ? "生成中…" : "未生成"}</div>`}
+          </div>
+          <div class="planInfo">
+            <div class="planHead"><b>${escapeHtml(shot.id)}</b><span class="muted">${formatSeconds(shot.durationSeconds)}</span><span class="state ${escapeHtml(shot.status)}">${escapeHtml(shotStatusLabel(shot.status))}</span></div>
+            <p class="planAction"><b>${escapeHtml(shot.title)}</b></p>
+            ${shot.action ? `<details class="fold planDetails"><summary>镜头描述</summary><p>${escapeHtml(shot.action)}</p></details>` : ""}
+            ${shot.error ? `<p class="inlineWarning error">${escapeHtml(shot.error)}</p>` : ""}
+            ${shot.prompt ? `<details><summary>H3 提示词 · ${escapeHtml(shot.promptMode || "")}</summary><pre>${escapeHtml(shot.prompt)}</pre></details>` : ""}
+          </div>
+        </div>
+      </div>`;
+    }).join("")}
+  </section>`;
+}
+
+function renderAssets(project) {
+  const items = (project.assets || []).slice().reverse().map(asset => ({ asset, type: mediaTypeForPath(asset.path) || "other" }));
+  const counts = { all: items.length, video: 0, image: 0, audio: 0, other: 0 };
+  for (const item of items) counts[item.type] += 1;
+  const filters = [
+    ["all", "全部", counts.all],
+    ["video", "视频", counts.video],
+    ["image", "图片", counts.image],
+    ["audio", "音频", counts.audio],
+    ["other", "其他", counts.other],
+  ].filter(([, , count]) => count > 0);
+  const filter = filters.some(([value]) => value === state.assetFilter) ? state.assetFilter : "all";
+  const filtered = filter === "all" ? items : items.filter(item => item.type === filter);
+  const visible = filtered.slice(0, 24);
+  const typeLabels = { video: "视频", image: "图片", audio: "音频", other: "文件" };
+  return `<section class="inspectorSection">
+    <div class="sectionHead"><h3>素材</h3><span class="count">${filter === "all" ? items.length : `${filtered.length} / ${items.length}`}</span></div>
+    <div class="filterChips">${filters.map(([value, label, count]) => `<button class="filterChip ${filter === value ? "active" : ""}" data-asset-filter="${value}">${label}<span>${count}</span></button>`).join("")}</div>
+    ${visible.length ? `<div class="assetGrid">${visible.map(({ asset, type }) => {
+      const src = fileUrl(project.id, asset.path);
+      const title = asset.label;
+      if (type === "other") return `<a class="assetPlain" href="${src}" target="_blank" rel="noreferrer">${escapeHtml(asset.kind)} · ${escapeHtml(asset.label)}</a>`;
+      const thumb = type === "image"
+        ? `<img loading="lazy" src="${src}" alt="" />`
+        : type === "video"
+          ? `<video muted preload="metadata" playsinline src="${src}"></video><span class="assetPlay">▶</span>`
+          : `<span class="assetAudio">♪</span>`;
+      return `<button class="assetCard" type="button" title="${escapeHtml(title)}" data-media-src="${src}" data-media-type="${type}" data-media-title="${escapeHtml(title)}" data-media-open="${src}"><span class="assetThumb">${thumb}</span><span class="assetLabel"><b>${typeLabels[type]}</b>${escapeHtml(asset.label)}</span></button>`;
+    }).join("")}</div>` : `<p class="emptyHint">${filter === "all" ? "还没有素材。" : "没有这类素材。"}</p>`}
+    ${filtered.length > visible.length ? `<p class="sectionHint">显示最近 ${visible.length} 个，共 ${filtered.length} 个。</p>` : ""}
+  </section>`;
 }
 
 function renderInspector(project = state.project, shots = state.shots) {
@@ -295,103 +514,37 @@ function renderInspector(project = state.project, shots = state.shots) {
     els.inspector.innerHTML = '<div class="emptyState small"><p>选择或新建项目后，这里显示学习成果、分镜与素材。</p></div>';
     return;
   }
+  const planCount = (project.plan || []).length;
+  const assetCount = (project.assets || []).length;
+  const skillCount = (state.skills || []).length;
+  const requested = state.inspectorTab;
+  const tabs = [
+    ["overview", "概览", 0],
+    ["shots", "分镜", planCount],
+    ["assets", "素材", assetCount],
+    ["skills", "技能", skillCount],
+  ];
+  const tab = tabs.some(([id]) => id === requested) ? requested : (planCount ? "shots" : "overview");
   const bible = project.styleBible;
   const brief = project.brief || {};
-  const sections = [];
-
-  sections.push(`<div class="inspectorSection">
-    <h3>${escapeHtml(project.title)} <span class="stageBadge">${escapeHtml(stageLabels[project.stage] || project.stage)}</span></h3>
-    <div class="briefCard">
-      <p>${brief.idea ? escapeHtml(brief.idea) : '<span class="muted">还没有记录需求</span>'}</p>
-      <div class="kv"><b>类型</b><span>${escapeHtml(brief.genre || "-")}</span></div>
-      <div class="kv"><b>画幅</b><span>${escapeHtml(brief.aspectRatio || "-")}</span></div>
-      <div class="kv"><b>目标时长</b><span>${brief.durationSeconds ? `${brief.durationSeconds} 秒` : "-"}</span></div>
-      ${(brief.mustKeep || []).length ? `<div class="chips">${brief.mustKeep.map(item => `<span class="chip">保留：${escapeHtml(item)}</span>`).join("")}</div>` : ""}
-      ${(brief.avoid || []).length ? `<div class="chips">${brief.avoid.map(item => `<span class="chip">避免：${escapeHtml(item)}</span>`).join("")}</div>` : ""}
-    </div>
-  </div>`);
-
   const learning = project.learning || { status: "none" };
-  sections.push(`<div class="inspectorSection">
-    <h3>学习 <span class="count">${escapeHtml(learningLabels[learning.status] || learning.status)}</span></h3>
-    ${learning.error ? `<p class="muted" style="font-size:12px;color:#fca5a5">${escapeHtml(learning.error)}</p>` : ""}
-    ${learning.warning ? `<p class="muted" style="font-size:12px;color:#fbbf24">${escapeHtml(learning.warning)}</p>` : ""}
-    ${learning.shotCount ? `<p class="muted" style="font-size:12px">${learning.shotCount} 个镜头 · ${formatSeconds(learning.sourceDuration)} · ${learning.sourceWidth}×${learning.sourceHeight}</p>` : ""}
-    ${shots.length ? `<div class="shotGrid" style="margin-top:10px">${shots.map(shot => `
-      <div class="shotCard">
-        <a class="mediaThumb" href="${fileUrl(project.id, shot.keyframe)}" data-media-src="${fileUrl(project.id, shot.keyframe)}" data-media-type="image" data-media-title="${escapeHtml(shot.id)} 关键帧" target="_blank" rel="noreferrer"><img loading="lazy" src="${fileUrl(project.id, shot.keyframe)}" alt="${escapeHtml(shot.id)}" /></a>
-        <div class="shotMeta"><strong>${escapeHtml(shot.id)} · ${formatSeconds(shot.duration)}</strong>${escapeHtml(shot.shotSize || "-")} · ${escapeHtml((shot.movement || "").slice(0, 42))}</div>
-      </div>`).join("")}</div>` : ""}
-  </div>`);
+  let content = "";
+  if (tab === "overview") content = renderOverview(project, shots, bible, brief, learning);
+  else if (tab === "shots") content = renderPlan(project);
+  else if (tab === "assets") content = renderAssets(project);
+  else content = renderSkills();
 
-  if (bible) {
-    sections.push(`<div class="inspectorSection">
-      <h3>风格圣经 <span class="count">${escapeHtml(bible.rhythm?.averageShotSeconds ?? "-")}s/镜</span></h3>
-      <div class="bibleCard">
-        <p style="margin:0 0 8px">${escapeHtml(bible.summary)}</p>
-        <p class="muted" style="font-size:11px;margin:0">${escapeHtml(bible.style?.stylePrefix)}</p>
+  els.inspector.innerHTML = `<header class="inspectorHeader">
+    <div class="inspectorTitleRow">
+      <div class="inspectorTitleText">
+        <h2>${escapeHtml(project.title)}</h2>
+        <p>最后更新 ${escapeHtml(formatUpdatedAt(project.updatedAt))}</p>
       </div>
-      <div style="margin-top:10px">
-        ${(bible.characters || []).map(character => `<div class="entity">
-          <div class="entityHead"><b>${escapeHtml(character.name)}</b><span>${escapeHtml(character.id)}</span></div>
-          <p>${escapeHtml(character.descriptionZh)}</p>
-          ${(character.stillImages || []).length ? `<div class="thumbs">${character.stillImages.slice(0, 3).map(path => `<a class="mediaThumb" href="${fileUrl(project.id, path)}" data-media-src="${fileUrl(project.id, path)}" data-media-type="image" data-media-title="${escapeHtml(character.name)} · 定妆照" target="_blank" rel="noreferrer"><img src="${fileUrl(project.id, path)}" alt="${escapeHtml(character.name)}" /></a>`).join("")}</div>` : ""}
-        </div>`).join("")}
-      </div>
-      <div>
-        ${(bible.locations || []).map(location => `<div class="entity">
-          <div class="entityHead"><b>${escapeHtml(location.name)}</b><span>${escapeHtml(location.id)}</span></div>
-          <p>${escapeHtml(location.descriptionZh)}</p>
-          ${(location.stillImages || []).length ? `<div class="thumbs">${location.stillImages.slice(0, 3).map(path => `<a class="mediaThumb" href="${fileUrl(project.id, path)}" data-media-src="${fileUrl(project.id, path)}" data-media-type="image" data-media-title="${escapeHtml(location.name)} · 场景照" target="_blank" rel="noreferrer"><img src="${fileUrl(project.id, path)}" alt="${escapeHtml(location.name)}" /></a>`).join("")}</div>` : ""}
-        </div>`).join("")}
-      </div>
-      <div class="chips">${(bible.cameraGrammar || []).map(move => `<span class="chip">${escapeHtml(move.name)}</span>`).join("")}</div>
-    </div>`);
-  }
-
-  if ((project.plan || []).length) {
-    sections.push(`<div class="inspectorSection">
-      <h3>分镜 <span class="count">${project.plan.length}</span></h3>
-      ${project.plan.map(shot => {
-        const videoUrl = shot.video ? fileUrl(project.id, shot.video) : "";
-        const preview = shot.video
-          ? (project.assets || []).find(asset => asset.kind === "frame" && asset.meta?.shotId === shot.id && (asset.label.includes("预览") || asset.path.includes("preview")))
-          : undefined;
-        const posterUrl = preview ? fileUrl(project.id, preview.path) : "";
-        return `<div class="planRow">
-        <div class="planHead"><b>${escapeHtml(shot.id)}</b><span class="muted">${formatSeconds(shot.durationSeconds)}</span><span class="state ${escapeHtml(shot.status)}">${escapeHtml(shot.status)}</span></div>
-        <p class="planAction">${escapeHtml(shot.title)} — ${escapeHtml(shot.action)}</p>
-        ${shot.video ? `<div class="planMedia"><button class="videoPoster" type="button" data-media-src="${videoUrl}" data-media-type="video" data-media-title="${escapeHtml(`${shot.id} ${shot.title}`)}" data-media-open="${videoUrl}" aria-label="弹窗预览 ${escapeHtml(shot.id)}"><video muted preload="metadata" playsinline ${posterUrl ? `poster="${posterUrl}"` : ""} src="${videoUrl}"></video><span class="playBadge"><span>▶ 弹窗预览</span></span></button></div>` : ""}
-        ${shot.error ? `<p style="font-size:11px;color:#fca5a5">${escapeHtml(shot.error)}</p>` : ""}
-        ${shot.prompt ? `<details><summary>H3 提示词 · ${escapeHtml(shot.promptMode || "")}</summary><pre>${escapeHtml(shot.prompt)}</pre></details>` : ""}
-      </div>`;
-      }).join("")}
-    </div>`);
-  }
-
-  sections.push(renderSkills());
-
-  if ((project.assets || []).length) {
-    sections.push(`<div class="inspectorSection">
-      <h3>素材 <span class="count">${project.assets.length}</span></h3>
-      <div class="assetGrid">
-        ${project.assets.slice(-16).reverse().map(asset => {
-          const src = fileUrl(project.id, asset.path);
-          const type = mediaTypeForPath(asset.path);
-          const title = `${asset.kind} · ${asset.label}`;
-          if (!type) return `<a class="assetPlain" href="${src}" target="_blank" rel="noreferrer">${escapeHtml(title)}</a>`;
-          const thumb = type === "image"
-            ? `<img loading="lazy" src="${src}" alt="" />`
-            : type === "video"
-              ? `<video muted preload="metadata" playsinline src="${src}"></video><span class="assetPlay">▶</span>`
-              : `<span class="assetAudio">♪</span>`;
-          return `<button class="assetCard" type="button" title="${escapeHtml(title)}" data-media-src="${src}" data-media-type="${type}" data-media-title="${escapeHtml(title)}" data-media-open="${src}"><span class="assetThumb">${thumb}</span><span class="assetLabel"><b>${escapeHtml(asset.kind)}</b>${escapeHtml(asset.label)}</span></button>`;
-        }).join("")}
-      </div>
-    </div>`);
-  }
-
-  els.inspector.innerHTML = sections.join("");
+      <span class="stageBadge">${escapeHtml(stageLabels[project.stage] || project.stage)}</span>
+    </div>
+    <nav class="inspectorTabs" role="tablist">${tabs.map(([id, label, count]) => `<button class="inspectorTab ${tab === id ? "active" : ""}" data-inspector-tab="${id}" role="tab" aria-selected="${tab === id}">${label}${count ? `<span>${count}</span>` : ""}</button>`).join("")}</nav>
+  </header>
+  <div class="inspectorContent">${content}</div>`;
 }
 
 async function loadProjects() {
@@ -431,6 +584,10 @@ function scheduleRefresh() {
 
 async function selectProject(id) {
   closeMedia();
+  state.inspectorTab = null;
+  state.assetFilter = "all";
+  state.skillFilter = "all";
+  state.showAllSkills = false;
   try {
     const data = await api(`/api/projects/${encodeURIComponent(id)}`);
     state.project = data.project;
@@ -609,6 +766,31 @@ els.mediaDialog.addEventListener("click", event => {
 els.mediaDialogClose.addEventListener("click", closeMedia);
 els.inspector.addEventListener("click", event => {
   if (!(event.target instanceof Element)) return;
+  const tab = event.target.closest("[data-inspector-tab]");
+  if (tab) {
+    state.inspectorTab = tab.dataset.inspectorTab;
+    els.inspector.scrollTop = 0;
+    renderInspector();
+    return;
+  }
+  const assetFilter = event.target.closest("[data-asset-filter]");
+  if (assetFilter) {
+    state.assetFilter = assetFilter.dataset.assetFilter;
+    renderInspector();
+    return;
+  }
+  const skillFilter = event.target.closest("[data-skill-filter]");
+  if (skillFilter) {
+    state.skillFilter = skillFilter.dataset.skillFilter;
+    state.showAllSkills = false;
+    renderInspector();
+    return;
+  }
+  if (event.target.closest("[data-show-all-skills]")) {
+    state.showAllSkills = !state.showAllSkills;
+    renderInspector();
+    return;
+  }
   const trigger = event.target.closest("[data-media-src]");
   if (!trigger || !els.inspector.contains(trigger)) return;
   event.preventDefault();
