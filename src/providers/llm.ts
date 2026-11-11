@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
 import { loadSettings } from "../config";
+import type { ChatAttachment } from "../types";
 
 export type ContentPart =
   | { type: "text"; text: string }
@@ -18,6 +19,8 @@ export type LlmMessage = {
   tool_calls?: LlmToolCall[];
   tool_call_id?: string;
   name?: string;
+  /** 仅用于本地会话/UI；发给模型前会转成文本块并移除该字段。 */
+  attachments?: ChatAttachment[];
 };
 
 export type ToolSpec = {
@@ -80,7 +83,7 @@ export async function chat(options: ChatOptions): Promise<{ content: string; too
   const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
   const body: Record<string, unknown> = {
     model,
-    messages: options.messages,
+    messages: options.messages.map(({ attachments, ...message }) => message),
     temperature: options.temperature ?? settings.llm.temperature,
     max_tokens: options.maxTokens ?? settings.llm.maxTokens,
   };

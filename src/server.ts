@@ -1,10 +1,11 @@
-import { join } from "node:path";
+import { basename, extname, join } from "node:path";
+import { writeFile } from "node:fs/promises";
 import { dataDir, loadSettings, maskSettings, preserveSecrets, saveSettings, settingsPath, webDir, defaultSettings } from "./config";
-import { ensureDir, exists, readJsonIfExists, safeJoin } from "./util/fs";
-import { createProject, getManifest, getProject, listProjects, projectDir, readSession } from "./store/projects";
+import { ensureDir, exists, readJsonIfExists, safeJoin, slugify, stamp } from "./util/fs";
+import { addAsset, createProject, getManifest, getProject, listProjects, projectDir, readSession, saveProject } from "./store/projects";
 import { listStylePacks } from "./store/library";
 import { getSkill, listSkills, searchSkills, skillEvidenceFile, skillToMarkdown, skillToSummary } from "./store/skills";
-import type { SkillKind } from "./types";
+import type { ChatAttachment, Project, SkillKind } from "./types";
 import { runAgentTurn } from "./agent/loop";
 import type { LlmMessage } from "./providers/llm";
 import { runProcess } from "./util/ffmpeg";
@@ -19,8 +20,36 @@ function messageOf(error: unknown) {
 
 function historyMessages(messages: LlmMessage[]) {
   return messages
-    .filter(message => (message.role === "user" || message.role === "assistant") && typeof message.content === "string" && message.content.trim())
-    .map(message => ({ role: message.role, content: message.content as string }));
+    .filter(message => (message.role === "user" || message.role === "assistant")
+      && ((typeof message.content === "string" && message.content.trim()) || message.attachments?.length))
+    .map(message => ({
+      role: message.role,
+      content: typeof message.content === "string" ? message.content : "",
+      ...(message.attachments?.length ? { attachments: message.attachments } : {}),
+    }));
+}
+
+function normalizeChatAttachments(value: unknown, project: Project): ChatAttachment[] {
+  if (!Array.isArray(value)) return [];
+  const uploads = new Map(project.assets.filter(asset => asset.kind === "upload").map(asset => [asset.path, asset]));
+  const result: ChatAttachment[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const path = (item as { path?: unknown }).path;
+    if (typeof path !== "string") continue;
+    const asset = uploads.get(path);
+    if (!asset) continue;
+    const kind: ChatAttachment["kind"] = /\.(mp4|mov|webm|m4v)$/i.test(path) ? "video" : "image";
+    result.push({
+      path: asset.path,
+      label: asset.label,
+      kind,
+      mimeType: typeof asset.meta?.mimeType === "string" ? asset.meta.mimeType : undefined,
+      size: typeof asset.meta?.size === "number" ? asset.meta.size : undefined,
+    });
+    if (result.length >= 6) break;
+  }
+  return result;
 }
 
 async function serveStatic(pathname: string) {
@@ -39,7 +68,7 @@ async function serveProjectFile(projectId: string, relative: string) {
 
 const activeProjects = new Set<string>();
 
-function chatStream(projectId: string, message: string) {
+function chatStream(projectId: string, message: string, attachments: ChatAttachment[] = []) {
   const encoder = new TextEncoder();
   const abort = new AbortController();
   const stream = new ReadableStream({
@@ -56,7 +85,7 @@ function chatStream(projectId: string, message: string) {
       };
       const heartbeat = setInterval(() => send({ type: "ping" }), 15_000);
       try {
-        await runAgentTurn(projectId, message, send, abort.signal);
+        await runAgentTurn(projectId, message, send, abort.signal, attachments);
       } catch (error) {
         if (!abort.signal.aborted) send({ type: "error", message: messageOf(error) });
       } finally {
@@ -148,18 +177,59 @@ const server = Bun.serve({
         if (!(await exists(file))) return new Response("Not found", { status: 404 });
         return new Response(Bun.file(file));
       }
+      const uploadMatch = path.match(/^\/api\/projects\/([^/]+)\/uploads$/);
+      if (uploadMatch) {
+        if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+        const projectId = decodeURIComponent(uploadMatch[1]);
+        const project = await getProject(projectId);
+        const form = await request.formData();
+        const files = form.getAll("files").filter(item => typeof item !== "string") as File[];
+        if (!files.length) throw new Error("没有收到上传文件");
+        if (files.length > 6) throw new Error("一次最多上传 6 个文件");
+        const uploaded = [];
+        const imageExtensions = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".bmp"];
+        const videoExtensions = [".mp4", ".mov", ".webm", ".m4v"];
+        for (const file of files) {
+          const originalName = (file.name || "upload").trim();
+          const extension = extname(originalName).toLowerCase();
+          const mimeType = (file.type || "").toLowerCase();
+          const isImage = mimeType.startsWith("image/") || imageExtensions.includes(extension);
+          const isVideo = mimeType.startsWith("video/") || videoExtensions.includes(extension);
+          if (!isImage && !isVideo) throw new Error(`只支持图片或视频：${originalName}`);
+          if (mimeType === "image/svg+xml" || extension === ".svg") throw new Error("不支持 SVG 上传，请使用 JPG/PNG/WebP");
+          const maxBytes = isVideo ? 140 * 1024 * 1024 : 20 * 1024 * 1024;
+          if (file.size > maxBytes) throw new Error(`${isVideo ? "视频" : "图片"}超过上限 ${Math.round(maxBytes / 1024 / 1024)}MB：${originalName}`);
+          const safeExtension = isVideo
+            ? (videoExtensions.includes(extension) ? extension : ".mp4")
+            : (imageExtensions.includes(extension) ? extension : ".jpg");
+          const base = slugify(basename(originalName, extname(originalName)), "upload");
+          const relative = `assets/uploads/${stamp()}-${crypto.randomUUID().slice(0, 8)}-${base}${safeExtension}`;
+          const absolute = safeJoin(projectDir(project.id), relative);
+          await ensureDir(join(projectDir(project.id), "assets", "uploads"));
+          await writeFile(absolute, new Uint8Array(await file.arrayBuffer()));
+          uploaded.push(addAsset(project, {
+            kind: "upload",
+            path: relative,
+            label: originalName,
+            meta: { mimeType: file.type || (isVideo ? "video/mp4" : "image/jpeg"), size: file.size, originalName },
+          }));
+        }
+        await saveProject(project);
+        return json({ assets: uploaded });
+      }
       const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/chat)?$/);
       if (projectMatch) {
         const projectId = decodeURIComponent(projectMatch[1]);
         if (projectMatch[2]) {
           if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-          const body = (await request.json()) as { message?: unknown };
+          const body = (await request.json()) as { message?: unknown; attachments?: unknown };
           const message = typeof body.message === "string" ? body.message.trim() : "";
-          if (!message) throw new Error("消息不能为空");
-          await getProject(projectId);
+          const project = await getProject(projectId);
+          const attachments = normalizeChatAttachments(body.attachments, project);
+          if (!message && !attachments.length) throw new Error("消息不能为空");
           if (activeProjects.has(projectId)) return json({ error: "该项目正在进行一轮对话，请等当前任务结束" }, 409);
           activeProjects.add(projectId);
-          return chatStream(projectId, message);
+          return chatStream(projectId, message, attachments);
         }
         if (request.method !== "GET") return json({ error: "Method not allowed" }, 405);
         const project = await getProject(projectId);

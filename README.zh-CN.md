@@ -167,7 +167,7 @@ src/
 ├── cli.ts                终端对话
 ├── config.ts             settings 读写（打码、密钥保留）
 ├── types.ts              领域模型
-├── agent/                对话循环、系统提示词、22 个工具
+├── agent/                对话循环、系统提示词、23 个工具
 ├── learn/                切片 → 标注 → 归纳 → 抽技能 → 编排
 ├── generate/             参考决策、H3 提示词、单镜生成、定妆照
 ├── providers/            llm / image / download(xhs) / video(icompify)，只做协议转换
@@ -189,7 +189,7 @@ data/
 └── projects/<projectId>/
     ├── project.json  session.json
     ├── learning/{slice.json,styleBible.json,.md,audio.m4a,shots/s01/...}
-    └── assets/{sources,stills,videos}/
+    └── assets/{sources,stills,videos,uploads}/
 ```
 
 `Project` 是唯一状态源：`brief`、`learning`、`styleBible`、`plan[]`、`assets[]`。分镜只存 `referenceShotIds`，不复制片段。
@@ -206,6 +206,7 @@ data/
 - 服务端、SSE、设置接口、项目文件访问、技能 API 与页面渲染。
 - 前端素材灯箱：关键帧、定妆照、技能证据与成片在页内弹窗查看（图片 / 视频 / 音频），支持遮罩与 ESC 关闭，不再跳新页面。
 - 对话 Markdown：助手消息在页内渲染标题、列表、表格、围栏代码块与安全链接；原始 HTML 会被转义，危险 URL 会被拒绝。
+- 聊天上传：图片/视频可附加或拖入输入框，保存到 `assets/uploads/`，随会话历史保留；用 `set_shot_references` 绑定到分镜（图片走 Ref2VA，首/尾帧走 I2VA/FL2VA）。
 - 一次真实计费 H3 T2VA 出片：9 秒、9:16、768×1344、含音轨，排队+推理约 141 秒；VLM 三帧质检判定"高度符合"，仅有轻微机位漂移与手指/画框轻微融合。
 - 一次真实计费 H3 Ref2VA 出片：人物定妆照 + 空场景照两张参考图，9 秒、9:16、768×1344、含音轨，约 248 秒；VLM 质检判定身份/房间/构图"高度符合"，无裁切/漂移，仅手部与墙面开关面板有轻微偏差。
 - 第二条参考片（120 秒小红书攀岩视频，16 镜）：抽取 8 条技能；9 秒 Ref2VA 攀岩镜头约 248 秒出片，VLM 判定动作、身份、馆内布局"高度符合"；5 条运镜/灯光/色彩技能升为 active（0.80）。
@@ -224,6 +225,7 @@ data/
 - 图片模型只支持文生图，未接图生图 / 参考图编辑。
 - 套用风格包只复制被引用的图片与片段，不复制原项目分镜。
 - 对话 Markdown 是轻量实现：不支持数学公式、脚注与原始 HTML；原始 HTML 会按文本显示。
+- 聊天上传单次最多 6 个文件，图片 ≤20MB、视频 ≤140MB；不支持 SVG。
 - 小红书下载依赖 `yt-dlp` 与你自己的浏览器登录态；私密、已删除、地区限制的笔记会失败。Safari 读 Cookie 需给终端「完全磁盘访问权限」。
 
 ## 路线图

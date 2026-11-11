@@ -170,7 +170,7 @@ src/
 ├── cli.ts                terminal chat
 ├── config.ts             settings load/save (masking, secret preservation)
 ├── types.ts              domain models
-├── agent/                conversation loop, system prompt, 22 tool handlers
+├── agent/                conversation loop, system prompt, 23 tool handlers
 ├── learn/                slice → annotate → distill → extract skills → orchestrate
 ├── generate/             reference decision, H3 prompt, single shot, stills
 ├── providers/            llm / image / download(xhs) / video(icompify) — protocol only
@@ -192,7 +192,7 @@ data/
 └── projects/<projectId>/
     ├── project.json  session.json
     ├── learning/{slice.json,styleBible.json,.md,audio.m4a,shots/s01/...}
-    └── assets/{sources,stills,videos}/
+    └── assets/{sources,stills,videos,uploads}/
 ```
 
 `Project` is the single source of truth: `brief`, `learning`, `styleBible`, `plan[]`, `assets[]`. Shot plans store only `referenceShotIds`, never duplicated clips.
@@ -209,6 +209,7 @@ Verified end to end:
 - Server, SSE, settings API, project file access, skills API, front-end rendering.
 - Front-end media lightbox: keyframes, stills, skill evidence and generated videos open in an in-page dialog (image / video / audio) with backdrop and ESC close; no new tab.
 - Chat Markdown: assistant messages render headings, lists, tables, fenced code and safe links in-page; raw HTML is escaped and dangerous URLs are rejected.
+- Chat uploads: images/videos can be attached or dragged into the composer, stored under `assets/uploads/`, kept in session history, and bound to a shot via `set_shot_references` (images → Ref2VA, first/last frames → I2VA/FL2VA).
 - One real billed H3 T2VA render: 9s, 9:16, 768×1344, with audio, ~141s queue+inference; a VLM three-frame check rated it "highly consistent" with minor camera drift and a slight finger/frame fusion.
 - One real billed H3 Ref2VA render from a character still + an empty location still: 9s, 9:16, 768×1344, with audio, ~248s; the VLM check rated identity, room and framing "highly consistent", with no crop or drift and only minor hand/switch-panel artifacts.
 - A second reference (120s Xiaohongshu climbing video, 16 shots): 8 skills extracted; a 9s Ref2VA climbing shot rendered in ~248s and rated "highly consistent" for action, identity and gym layout; five camera/lighting/color skills moved to `active` (0.80).
@@ -227,6 +228,7 @@ Not yet verified: real I2VA / FL2VA renders (request shape mirrors the Toonflow 
 - The image provider is text-to-image only; no image editing or reference-image conditioning.
 - Applying a style pack copies only referenced images and clips, not the source project's shot plan.
 - Chat Markdown is a small subset: no math, footnotes or raw HTML; raw HTML is shown as text.
+- Chat uploads are capped at 6 files per message, 20MB per image and 140MB per video; SVG is rejected.
 - Xiaohongshu download depends on `yt-dlp` and your own browser session; private, deleted or region-locked notes fail. Reading Safari cookies requires Full Disk Access for the terminal.
 
 ## Roadmap

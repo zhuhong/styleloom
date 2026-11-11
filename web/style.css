@@ -86,6 +86,13 @@ code { background: #1f2733; padding: 1px 5px; border-radius: 5px; font-size: 12p
 .bubble.assistant { align-self: flex-start; background: var(--panel); border: 1px solid var(--line); }
 .bubble.error { align-self: flex-start; background: #2a1717; border: 1px solid #5b2626; color: #fecaca; }
 
+.bubbleAttachments { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.bubbleAttachment { display: flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 7px 3px 3px; border: 1px solid var(--line); border-radius: 8px; background: rgba(8, 10, 14, 0.35); color: var(--text); font-size: 11px; cursor: zoom-in; }
+.bubbleAttachment:hover { border-color: #3a6b5c; }
+.bubbleAttachmentThumb { display: grid; flex: none; place-items: center; width: 38px; height: 30px; overflow: hidden; border-radius: 5px; background: #0a0c10; color: var(--muted); }
+.bubbleAttachmentThumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.bubbleAttachmentName { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* 助手消息的 Markdown 排版 */
 .bubble.assistant.markdown { white-space: normal; overflow-wrap: anywhere; }
 .bubble.assistant.markdown > :first-child { margin-top: 0; }
@@ -145,11 +152,28 @@ code { background: #1f2733; padding: 1px 5px; border-radius: 5px; font-size: 12p
 .progress i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width 0.3s; }
 .progressLabel { margin-top: 5px; color: var(--muted); font-size: 11px; }
 
-.composer { display: flex; gap: 10px; padding: 12px 18px; border-top: 1px solid var(--line); background: rgba(18, 22, 28, 0.85); }
+.composer { display: flex; align-items: stretch; gap: 10px; padding: 12px 18px; border-top: 1px solid var(--line); background: rgba(18, 22, 28, 0.85); }
+.composer.dragging { background: rgba(52, 211, 153, 0.08); box-shadow: inset 0 0 0 1px #3a6b5c; }
+.composerMain { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 8px; }
 .composer textarea { flex: 1; resize: none; min-height: 46px; max-height: 180px; padding: 11px 13px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); outline: none; }
 .composer textarea:focus { border-color: #3a6b5c; }
-.composer button { width: 78px; border: none; border-radius: 10px; background: linear-gradient(135deg, #34d399, #22d3ee); color: #06251d; font-weight: 600; }
-.composer button:disabled { opacity: 0.5; cursor: default; }
+.composer #sendButton { flex: none; width: 78px; border: none; border-radius: 10px; background: linear-gradient(135deg, #34d399, #22d3ee); color: #06251d; font-weight: 600; }
+.composer #sendButton:disabled { opacity: 0.5; cursor: default; }
+.attachButton { flex: none; width: 44px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--muted); font-size: 22px; line-height: 1; }
+.attachButton:hover { border-color: #3a6b5c; color: var(--accent); }
+.attachButton:disabled { opacity: 0.5; cursor: default; }
+.pendingUploads { display: flex; flex-wrap: wrap; gap: 6px; }
+.pendingUploads[hidden] { display: none; }
+.uploadChip { display: flex; align-items: center; gap: 6px; max-width: 100%; padding: 4px 5px 4px 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font-size: 11px; }
+.uploadChip.error { border-color: #5b2626; }
+.uploadThumb { display: grid; flex: none; place-items: center; width: 36px; height: 28px; overflow: hidden; border-radius: 5px; background: #0a0c10; color: var(--muted); cursor: zoom-in; }
+.uploadThumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.uploadVideoIcon { font-size: 12px; }
+.uploadName { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.uploadMeta { flex: none; color: var(--muted); white-space: nowrap; }
+.uploadChip.error .uploadMeta { color: #fca5a5; }
+.uploadChip > button { flex: none; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--muted); font-size: 16px; line-height: 1; }
+.uploadChip > button:hover { color: var(--danger); background: #2a1717; }
 .composerHint { padding: 0 20px 10px; color: #5d6675; font-size: 11px; }
 
 .inspector { min-height: 0; overflow: auto; padding: 0; background: rgba(15, 18, 23, 0.6); }

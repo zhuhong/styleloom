@@ -1,7 +1,7 @@
 import { loadSettings } from "../config";
 import { chat, type LlmMessage } from "../providers/llm";
 import { getProject, readSession, saveProject, writeSession } from "../store/projects";
-import type { AgentEvent } from "../types";
+import type { AgentEvent, ChatAttachment } from "../types";
 import { buildSystemPrompt } from "./prompt";
 import { executeTool, toolSpecs, type ToolContext } from "./tools";
 
@@ -33,6 +33,11 @@ function sanitizeMessages(messages: LlmMessage[]) {
   return output;
 }
 
+function attachmentBlock(attachments: ChatAttachment[]) {
+  const lines = attachments.map(attachment => `- ${attachment.kind === "image" ? "图片" : "视频"}：${attachment.path}${attachment.label ? `（原始文件名：${attachment.label}）` : ""}`);
+  return `[用户上传素材]\n${lines.join("\n")}\n这些是项目内相对路径；需要作为参考时，用 list_assets 查看，再用 set_shot_references 绑定到具体分镜（图片 role=subject/location，视频放 videos；首帧/尾帧用 firstFrame/lastFrame）。`;
+}
+
 function trimMessages(messages: LlmMessage[]) {
   if (messages.length <= MAX_MESSAGES) return messages;
   let start = messages.length - MAX_MESSAGES;
@@ -47,12 +52,13 @@ export async function runAgentTurn(
   userMessage: string,
   emit: (event: AgentEvent) => void,
   signal: AbortSignal,
+  attachments: ChatAttachment[] = [],
 ) {
   const project = await getProject(projectId);
   const settings = await loadSettings();
   const messages = await readSession<LlmMessage>(projectId);
-  messages.push({ role: "user", content: userMessage });
-  emit({ type: "message", role: "user", content: userMessage });
+  messages.push({ role: "user", content: userMessage, ...(attachments.length ? { attachments } : {}) });
+  emit({ type: "message", role: "user", content: userMessage, ...(attachments.length ? { attachments } : {}) });
 
   const ctx: ToolContext = {
     project,
@@ -68,7 +74,15 @@ export async function runAgentTurn(
     for (let step = 0; step < MAX_STEPS; step++) {
       signal.throwIfAborted();
       const result = await chat({
-        messages: [{ role: "system", content: await buildSystemPrompt(project, settings) }, ...trimMessages(sanitizeMessages(messages))],
+        messages: [
+          { role: "system", content: await buildSystemPrompt(project, settings) },
+          ...trimMessages(sanitizeMessages(messages)).map(message => {
+            if (message.role !== "user" || !message.attachments?.length) return message;
+            const { attachments, ...rest } = message;
+            const content = typeof rest.content === "string" ? rest.content : "";
+            return { ...rest, content: `${content}${content ? "\n\n" : ""}${attachmentBlock(attachments)}` };
+          }),
+        ],
         tools: toolSpecs,
         signal,
       });

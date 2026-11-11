@@ -14,6 +14,8 @@ const state = {
   assetFilter: "all",
   skillFilter: "all",
   showAllSkills: false,
+  pendingUploads: [],
+  uploading: 0,
 };
 
 const els = {
@@ -24,6 +26,9 @@ const els = {
   input: document.getElementById("input"),
   composer: document.getElementById("composer"),
   sendButton: document.getElementById("sendButton"),
+  attachButton: document.getElementById("attachButton"),
+  fileInput: document.getElementById("fileInput"),
+  pendingUploads: document.getElementById("pendingUploads"),
   newProjectButton: document.getElementById("newProjectButton"),
   settingsButton: document.getElementById("settingsButton"),
   settingsDialog: document.getElementById("settingsDialog"),
@@ -48,6 +53,7 @@ const toolLabels = {
   build_shot_prompt: "编写 H3 提示词",
   generate_still: "生成定妆照 / 场景照",
   generate_shot: "生成视频",
+  set_shot_references: "绑定参考素材",
   stitch_shots: "拼接成片",
   list_assets: "查看素材",
   list_style_packs: "查看风格包",
@@ -108,6 +114,13 @@ function formatDuration(ms) {
   if (minutes < 60) return `${minutes}m ${String(rest).padStart(2, "0")}s`;
   const hours = Math.floor(minutes / 60);
   return `${hours}h ${String(minutes % 60).padStart(2, "0")}m`;
+}
+
+function formatFileSize(bytes) {
+  const size = Number(bytes) || 0;
+  if (size < 1024) return `${size}B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)}KB`;
+  return `${(size / 1024 / 1024).toFixed(1)}MB`;
 }
 
 function skillStatusLabel(status) {
@@ -219,7 +232,36 @@ function clearEmptyState() {
   els.messages.querySelector(".emptyState")?.remove();
 }
 
-function addBubble(role, content, isError = false) {
+function attachmentNode(attachment) {
+  const src = fileUrl(state.project?.id, attachment.path);
+  const type = attachment.kind || mediaTypeForPath(attachment.path) || "image";
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "bubbleAttachment";
+  button.dataset.mediaSrc = src;
+  button.dataset.mediaType = type;
+  button.dataset.mediaTitle = attachment.label || attachment.path.split("/").pop() || "";
+  button.dataset.mediaOpen = src;
+  button.title = attachment.label || attachment.path;
+  const thumb = document.createElement("span");
+  thumb.className = "bubbleAttachmentThumb";
+  if (type === "video") {
+    thumb.innerHTML = '<span class="uploadVideoIcon">▶</span>';
+  } else {
+    const image = document.createElement("img");
+    image.src = src;
+    image.alt = "";
+    image.loading = "lazy";
+    thumb.append(image);
+  }
+  const name = document.createElement("span");
+  name.className = "bubbleAttachmentName";
+  name.textContent = attachment.label || attachment.path.split("/").pop() || "附件";
+  button.append(thumb, name);
+  return button;
+}
+
+function addBubble(role, content, isError = false, attachments = []) {
   clearEmptyState();
   const bubble = document.createElement("div");
   bubble.className = `bubble ${isError ? "error" : role}`;
@@ -228,6 +270,12 @@ function addBubble(role, content, isError = false) {
     bubble.innerHTML = renderMarkdown(content);
   } else {
     bubble.textContent = content;
+  }
+  if (attachments?.length) {
+    const wrap = document.createElement("div");
+    wrap.className = "bubbleAttachments";
+    for (const attachment of attachments) wrap.append(attachmentNode(attachment));
+    bubble.append(wrap);
   }
   els.messages.append(bubble);
   scrollToBottom();
@@ -325,7 +373,7 @@ function renderHistory(messages) {
     </div>`;
     return;
   }
-  for (const message of messages) addBubble(message.role, message.content);
+  for (const message of messages) addBubble(message.role, message.content, false, message.attachments || []);
 }
 
 function renderEntity(project, entity, kind) {
@@ -615,6 +663,7 @@ function scheduleRefresh() {
 
 async function selectProject(id) {
   closeMedia();
+  clearPendingUploads();
   state.inspectorTab = null;
   state.assetFilter = "all";
   state.skillFilter = "all";
@@ -632,24 +681,139 @@ async function selectProject(id) {
   }
 }
 
-function setStreaming(value) {
-  state.streaming = value;
-  els.sendButton.disabled = value;
-  els.sendButton.textContent = value ? "生成中…" : "发送";
+function updateComposerState() {
+  const busy = state.streaming || state.uploading > 0;
+  els.sendButton.disabled = busy;
+  els.sendButton.textContent = state.streaming ? "生成中…" : state.uploading > 0 ? "上传中…" : "发送";
+  els.attachButton.disabled = busy;
 }
 
-async function sendMessage(message) {
+function setStreaming(value) {
+  state.streaming = value;
+  updateComposerState();
+}
+
+function renderPendingUploads() {
+  if (!state.pendingUploads.length) {
+    els.pendingUploads.hidden = true;
+    els.pendingUploads.innerHTML = "";
+    return;
+  }
+  els.pendingUploads.hidden = false;
+  els.pendingUploads.innerHTML = state.pendingUploads.map((item, index) => {
+    const label = item.asset?.label || item.file.name;
+    const meta = item.status === "uploading" ? "上传中…" : item.status === "error" ? (item.error || "上传失败") : formatFileSize(item.size ?? item.file.size);
+    const thumb = item.kind === "video"
+      ? '<span class="uploadVideoIcon">▶</span>'
+      : `<img src="${escapeHtml(item.previewUrl || "")}" alt="" />`;
+    const media = item.status === "done" && item.previewUrl
+      ? ` data-media-src="${escapeHtml(item.previewUrl)}" data-media-type="${escapeHtml(item.kind)}" data-media-title="${escapeHtml(label)}" data-media-open="${escapeHtml(item.previewUrl)}"`
+      : "";
+    return `<div class="uploadChip ${item.status}">
+      <span class="uploadThumb"${media}>${thumb}</span>
+      <span class="uploadName">${escapeHtml(label)}</span>
+      <span class="uploadMeta">${escapeHtml(meta)}</span>
+      <button type="button" data-remove-upload="${index}" aria-label="移除 ${escapeHtml(label)}">×</button>
+    </div>`;
+  }).join("");
+}
+
+function removePendingUpload(index) {
+  const [entry] = state.pendingUploads.splice(index, 1);
+  if (entry?.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(entry.previewUrl);
+  renderPendingUploads();
+  updateComposerState();
+}
+
+function clearPendingUploads() {
+  for (const entry of state.pendingUploads) {
+    if (entry.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(entry.previewUrl);
+  }
+  state.pendingUploads = [];
+  state.uploading = 0;
+  if (els.pendingUploads) renderPendingUploads();
+  if (els.sendButton) updateComposerState();
+}
+
+function isUploadableFile(file) {
+  return file.type.startsWith("image/") || file.type.startsWith("video/")
+    || /\.(jpe?g|png|webp|gif|avif|bmp|mp4|mov|webm|m4v)$/i.test(file.name);
+}
+
+async function uploadFiles(fileList) {
+  if (!state.project) {
+    addBubble("assistant", "请先新建或选择一个项目，再上传素材。", true);
+    return;
+  }
+  const files = [...fileList].filter(isUploadableFile);
+  if (!files.length) {
+    addBubble("assistant", "只支持上传图片或视频。", true);
+    return;
+  }
+  if (state.pendingUploads.length + files.length > 6) {
+    addBubble("assistant", "一次最多上传 6 个素材。", true);
+    return;
+  }
+  const entries = files.map(file => ({
+    file,
+    kind: file.type.startsWith("video/") || /\.(mp4|mov|webm|m4v)$/i.test(file.name) ? "video" : "image",
+    previewUrl: URL.createObjectURL(file),
+    status: "uploading",
+  }));
+  state.pendingUploads.push(...entries);
+  state.uploading += entries.length;
+  renderPendingUploads();
+  updateComposerState();
+
+  const form = new FormData();
+  for (const entry of entries) form.append("files", entry.file, entry.file.name);
+  try {
+    const response = await fetch(`/api/projects/${encodeURIComponent(state.project.id)}/uploads`, { method: "POST", body: form });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+    const assets = Array.isArray(data.assets) ? data.assets : [];
+    for (const [index, entry] of entries.entries()) {
+      const asset = assets[index];
+      if (!asset) {
+        entry.status = "error";
+        entry.error = "服务端未返回素材";
+        continue;
+      }
+      entry.asset = asset;
+      entry.kind = mediaTypeForPath(asset.path) === "video" ? "video" : "image";
+      entry.mimeType = asset.meta?.mimeType;
+      entry.size = asset.meta?.size;
+      entry.status = "done";
+      if (entry.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(entry.previewUrl);
+      entry.previewUrl = fileUrl(state.project.id, asset.path);
+    }
+    scheduleRefresh();
+  } catch (error) {
+    for (const entry of entries) {
+      entry.status = "error";
+      entry.error = error.message;
+    }
+    addBubble("assistant", `上传失败：${error.message}`, true);
+  } finally {
+    state.uploading = Math.max(0, state.uploading - entries.length);
+    els.fileInput.value = "";
+    renderPendingUploads();
+    updateComposerState();
+  }
+}
+
+async function sendMessage(message, attachments = []) {
   if (!state.project) {
     addBubble("assistant", "请先新建或选择一个项目。", true);
     return;
   }
   setStreaming(true);
-  addBubble("user", message);
+  addBubble("user", message, false, attachments);
   try {
     const response = await fetch(`/api/projects/${encodeURIComponent(state.project.id)}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, attachments }),
     });
     if (!response.ok || !response.body) {
       const text = await response.text();
@@ -689,7 +853,7 @@ async function sendMessage(message) {
 function handleEvent(event) {
   if (event.type === "message") {
     if (event.role === "user") return;
-    addBubble("assistant", event.content);
+    addBubble("assistant", event.content, false, event.attachments || []);
   } else if (event.type === "tool_start") {
     addToolCard(event);
   } else if (event.type === "progress") {
@@ -741,9 +905,13 @@ async function loadSettings() {
 els.composer.addEventListener("submit", event => {
   event.preventDefault();
   const message = els.input.value.trim();
-  if (!message || state.streaming) return;
+  const attachments = state.pendingUploads
+    .filter(item => item.status === "done" && item.asset)
+    .map(item => ({ path: item.asset.path, label: item.asset.label, kind: item.kind, mimeType: item.mimeType, size: item.size }));
+  if ((!message && !attachments.length) || state.streaming || state.uploading > 0) return;
   els.input.value = "";
-  sendMessage(message);
+  clearPendingUploads();
+  sendMessage(message, attachments);
 });
 
 els.input.addEventListener("keydown", event => {
@@ -751,6 +919,56 @@ els.input.addEventListener("keydown", event => {
     event.preventDefault();
     els.composer.requestSubmit();
   }
+});
+
+els.attachButton.addEventListener("click", () => els.fileInput.click());
+els.fileInput.addEventListener("change", () => {
+  if (els.fileInput.files?.length) uploadFiles(els.fileInput.files);
+});
+
+els.pendingUploads.addEventListener("click", event => {
+  const remove = event.target.closest("[data-remove-upload]");
+  if (remove) {
+    event.preventDefault();
+    removePendingUpload(Number(remove.dataset.removeUpload));
+    return;
+  }
+  const trigger = event.target.closest("[data-media-src]");
+  if (!trigger) return;
+  event.preventDefault();
+  const src = trigger.dataset.mediaSrc;
+  openMedia({
+    src,
+    type: trigger.dataset.mediaType || mediaTypeForPath(src) || "image",
+    title: trigger.dataset.mediaTitle || "",
+    openUrl: trigger.dataset.mediaOpen || src,
+  });
+});
+
+els.composer.addEventListener("dragover", event => {
+  event.preventDefault();
+  els.composer.classList.add("dragging");
+});
+els.composer.addEventListener("dragleave", event => {
+  if (!els.composer.contains(event.relatedTarget)) els.composer.classList.remove("dragging");
+});
+els.composer.addEventListener("drop", event => {
+  event.preventDefault();
+  els.composer.classList.remove("dragging");
+  if (event.dataTransfer?.files?.length) uploadFiles(event.dataTransfer.files);
+});
+
+els.messages.addEventListener("click", event => {
+  const trigger = event.target.closest("[data-media-src]");
+  if (!trigger) return;
+  event.preventDefault();
+  const src = trigger.dataset.mediaSrc;
+  openMedia({
+    src,
+    type: trigger.dataset.mediaType || mediaTypeForPath(src) || "image",
+    title: trigger.dataset.mediaTitle || "",
+    openUrl: trigger.dataset.mediaOpen || trigger.getAttribute("href") || src,
+  });
 });
 
 els.newProjectButton.addEventListener("click", async () => {
@@ -853,6 +1071,8 @@ els.settingsForm.addEventListener("submit", async event => {
     addBubble("assistant", `保存设置失败：${error.message}`, true);
   }
 });
+
+updateComposerState();
 
 (async function boot() {
   try {

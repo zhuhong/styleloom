@@ -21,7 +21,7 @@ function learningSnapshot(project: Project) {
 function planSnapshot(project: Project) {
   if (!project.plan.length) return "分镜：尚未创建。";
   return `分镜（${project.plan.length} 个，合计 ${project.plan.reduce((total, shot) => total + shot.durationSeconds, 0)} 秒）：
-${project.plan.map(shot => `${shot.id} | ${shot.durationSeconds}s | ${shot.status} | 角色 ${shot.characterIds.join("/") || "-"} | 场景 ${shot.locationId ?? "-"} | 参考 ${shot.referenceShotIds.join("/") || "-"} | 技能 ${shot.skillIds?.join("/") || "-"} | ${shot.title} | ${shot.action.slice(0, 70)}`).join("\n")}`;
+${project.plan.map(shot => `${shot.id} | ${shot.durationSeconds}s | ${shot.status} | 角色 ${shot.characterIds.join("/") || "-"} | 场景 ${shot.locationId ?? "-"} | 参考镜头 ${shot.referenceShotIds.join("/") || "-"} | 参考素材 ${shot.referenceImages?.length ?? 0}图/${shot.referenceVideos?.length ?? 0}视频 | 技能 ${shot.skillIds?.join("/") || "-"} | ${shot.title} | ${shot.action.slice(0, 70)}`).join("\n")}`;
 }
 
 function capabilitySnapshot(settings: Settings) {
@@ -66,6 +66,7 @@ export async function buildSystemPrompt(project: Project, settings: Settings) {
 4. plan_shots 写分镜：每个镜头 1-15 秒整数，默认 5-8 秒；只有用户明确要短镜头时才低于 4 秒。action / camera / lighting / sound / dialogue 用英文（dialogue 保留用户原文）。
 5. build_shot_prompt 预览提示词（不花钱）。
 6. 把「镜头表 + 关键提示词 + 预计总时长」展示给用户，明确询问是否开始生成。只有用户明确同意后，才调用 generate_shot（confirmed=true）。逐镜头生成，一次一个。
+   用户上传了图片/视频时，先用 list_assets 确认路径，再用 set_shot_references 绑定到具体分镜；不要假设上传文件就是首帧。
 7. 所有镜头生成后，用 stitch_shots 拼接成片（本地 ffmpeg，不额外计费）；默认按分镜顺序硬切，需要转场时传 transitionSeconds。不要只给用户 ffmpeg 命令。
 8. 生成/拼接完成后用 list_assets 核对，向用户说明成片路径与镜头状态。
 
@@ -81,6 +82,12 @@ export async function buildSystemPrompt(project: Project, settings: Settings) {
 
 ${skillIndex}
 
+## 用户上传素材
+- 聊天框上传的图片/视频保存在 \`assets/uploads/\`，消息里会列出项目内相对路径。
+- 人物/场景参考图用 \`set_shot_references\` 的 \`images\`，\`role=subject\` 或 \`location\`，系统会自动走 Ref2VA。
+- 参考视频用 \`videos\`；只有用户明确说“当首帧/尾帧”时才设置 \`firstFrame\` / \`lastFrame\`（I2VA/FL2VA）。
+- 不要引用项目外路径，也不要把用户上传的视频当成已学习的参考片；它们只是本次参考素材。
+
 ## 复用运镜
 - 想让新镜头继承参考片的运镜/节奏：在 plan_shots 里设置 referenceShotIds（来自 read_learning_shots 的真实镜头 id）。有参考片段时系统会走 ref2va，把参考片段作为 <Video N> 传入。
 - 只想复用风格与人物：用 generate_still 的定妆照作为首帧，走 i2va，稳定身份。
@@ -88,6 +95,7 @@ ${skillIndex}
 
 ## 硬规则
 - 时长只能是 1-15 秒整数；默认单镜头 5-8 秒。成片更长时拆成多个镜头。
+- 用户上传的素材路径必须是项目内相对路径（assets/uploads/...）；不要编造路径，也不要把上传文件直接说成已生成结果。
 - 低于 4 秒的短镜头：generate_shot 默认按 4 秒生成后本地裁剪，并在回复里说明；只有用户明确要验证 H3 短档位时才传 experimentalDuration=true，直发失败要如实报告平台错误。
 - 画幅默认 16:9，除非用户指定。H3 输出固定 768P。
 - 不要在回复里编造已经生成的文件或平台结果；一切以工具返回为准。

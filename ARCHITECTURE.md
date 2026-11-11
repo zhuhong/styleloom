@@ -39,6 +39,8 @@
 
 SSE 事件：`message`、`tool_start`、`progress`、`tool_end`、`state`、`error`、`ping`、`done`。心跳每 15 秒，防止代理断流。
 
+上传链路：浏览器 `POST /api/projects/:id/uploads`（multipart，最多 6 个）→ 写入 `assets/uploads/` 并登记 `AssetRecord(kind=upload)`；聊天消息携带 `attachments`，发给模型前转成项目内路径文本块，模型再用 `set_shot_references` 绑定到分镜。
+
 ## 学习管线
 
 ### 1. 切片 `learn/slice.ts`
@@ -172,7 +174,8 @@ Agent 在规划前 `search_skills`、命中后 `read_skill`，把 prompt fragmen
 | `update_skill` / `merge_skills` | 修正/合并技能 | 无 |
 | `export_skills` | 把本机技能导出为公开条目到 `skills/`（剥离证据图/反馈/置信度） | 无 |
 | `update_style_bible` | 人工修正（深合并） | 无 |
-| `plan_shots` | 写入分镜 | 无 |
+| `plan_shots` | 写入分镜，可带 referenceImages/referenceVideos | 无 |
+| `set_shot_references` | 把项目内图片/视频绑定到分镜（Ref2VA/I2VA/FL2VA） | 无 |
 | `build_shot_prompt` | 生成并校验 H3 提示词 | 文本模型 |
 | `generate_still` | 定妆照/场景照（可回退参考帧） | 图片模型 |
 | `generate_shot` | H3 生成单镜（需确认） | **视频计费** |

@@ -2,9 +2,9 @@ import { homedir } from "node:os";
 import { dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { dataDir } from "../config";
 import type { Settings } from "../config";
-import type { AgentEvent, PromptMode, Project, ShotPlan, SkillKind, Stage, StyleBible } from "../types";
+import type { AgentEvent, PromptMode, Project, ShotPlan, ShotReferenceImage, ShotReferenceVideo, SkillKind, Stage, StyleBible } from "../types";
 import type { ToolSpec } from "../providers/llm";
-import { copyInto, ensureDir, nowIso, safeJoin } from "../util/fs";
+import { copyInto, ensureDir, exists, nowIso, safeJoin } from "../util/fs";
 import { addAsset, getManifest, projectDir } from "../store/projects";
 import { applyStylePack, listStylePacks } from "../store/library";
 import { studyReferenceVideo } from "../learn/study";
@@ -54,6 +54,34 @@ function optNumber(args: Args, name: string) {
 function stringArray(args: Args, name: string) {
   const value = args[name];
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map(item => item.trim()) : [];
+}
+
+function parseReferenceImages(value: unknown): ShotReferenceImage[] {
+  if (!Array.isArray(value)) return [];
+  const result: ShotReferenceImage[] = [];
+  for (const item of value) {
+    const raw = record(item);
+    const path = optString(raw, "path");
+    if (!path) continue;
+    const role = optString(raw, "role");
+    if (role !== "subject" && role !== "location") throw new Error("referenceImages.role 只能是 subject 或 location");
+    result.push({ path, role, label: optString(raw, "label") });
+    if (result.length >= 4) break;
+  }
+  return result;
+}
+
+function parseReferenceVideos(value: unknown): ShotReferenceVideo[] {
+  if (!Array.isArray(value)) return [];
+  const result: ShotReferenceVideo[] = [];
+  for (const item of value) {
+    const raw = record(item);
+    const path = optString(raw, "path");
+    if (!path) continue;
+    result.push({ path, label: optString(raw, "label") });
+    if (result.length >= 3) break;
+  }
+  return result;
 }
 
 function deepMerge(target: Args, patch: Args): Args {
@@ -290,6 +318,8 @@ export const toolSpecs: ToolSpec[] = [
               generationMode: { type: "string", enum: ["auto", "t2va", "i2va", "fl2va", "l2va", "ref2va"], description: "强制生成模式；auto 按素材自动选择" },
               firstFrame: { type: "string", description: "项目内相对路径，可选" },
               lastFrame: { type: "string", description: "项目内相对路径，可选" },
+              referenceImages: { type: "array", items: { type: "object", properties: { path: { type: "string" }, role: { type: "string", enum: ["subject", "location"] }, label: { type: "string" } }, required: ["path", "role"] }, description: "Ref2VA 参考图，最多 4 张" },
+              referenceVideos: { type: "array", items: { type: "object", properties: { path: { type: "string" }, label: { type: "string" } }, required: ["path"] }, description: "Ref2VA 参考视频，最多 3 段" },
             },
             required: ["action", "camera"],
           },
@@ -334,6 +364,22 @@ export const toolSpecs: ToolSpec[] = [
         skillIds: { type: "array", items: { type: "string" }, description: "本次实际采用的技能 id，用于统计效果" },
       },
       required: ["shotId", "confirmed"],
+    },
+  },
+  {
+    name: "set_shot_references",
+    description: "把项目内图片/视频绑定到某个分镜作为 H3 参考。images 的 role=subject/location 会自动走 Ref2VA；firstFrame/lastFrame 走 I2VA/FL2VA；videos 走 Ref2VA。用户上传的素材在 assets/uploads/。",
+    parameters: {
+      type: "object",
+      properties: {
+        shotId: { type: "string" },
+        images: { type: "array", items: { type: "object", properties: { path: { type: "string" }, role: { type: "string", enum: ["subject", "location"] }, label: { type: "string" } }, required: ["path", "role"] }, description: "参考图，最多 4 张" },
+        videos: { type: "array", items: { type: "object", properties: { path: { type: "string" }, label: { type: "string" } }, required: ["path"] }, description: "参考视频，最多 3 段" },
+        firstFrame: { type: "string", description: "首帧图片路径；空字符串表示清除" },
+        lastFrame: { type: "string", description: "尾帧图片路径；空字符串表示清除" },
+        clear: { type: "boolean", description: "清空该镜头的所有参考绑定" },
+      },
+      required: ["shotId"],
     },
   },
   {
@@ -555,10 +601,24 @@ async function planShots(ctx: ToolContext, args: Args) {
       generationMode,
       firstFrame: optString(value, "firstFrame"),
       lastFrame: optString(value, "lastFrame"),
+      referenceImages: parseReferenceImages(value.referenceImages),
+      referenceVideos: parseReferenceVideos(value.referenceVideos),
       status: "planned" as const,
       updatedAt: nowIso(),
     };
   });
+  const root = projectDir(ctx.project.id);
+  for (const shot of plan) {
+    const paths = [
+      shot.firstFrame,
+      shot.lastFrame,
+      ...(shot.referenceImages ?? []).map(image => image.path),
+      ...(shot.referenceVideos ?? []).map(video => video.path),
+    ].filter((path): path is string => Boolean(path));
+    for (const path of paths) {
+      if (!(await exists(safeJoin(root, path)))) throw new Error(`素材不存在：${path}`);
+    }
+  }
   ctx.project.plan = plan;
   if (ctx.project.stage !== "generate") ctx.project.stage = "plan";
   await ctx.save();
@@ -570,6 +630,49 @@ async function planShots(ctx: ToolContext, args: Args) {
     ...(shortShots.length ? {
       warnings: shortShots.map(shot => `${shot.id} 时长 ${shot.durationSeconds}s 低于 H3 常规下限 ${H3_SAFE_MIN_SECONDS}s；generate_shot 默认按 ${H3_SAFE_MIN_SECONDS}s 生成后裁剪，experimentalDuration=true 才会直接请求短时长。`),
     } : {}),
+  };
+}
+
+async function setShotReferences(ctx: ToolContext, args: Args) {
+  const shotId = reqString(args, "shotId");
+  const shot = ctx.project.plan.find(item => item.id === shotId);
+  if (!shot) return { ok: false, error: `分镜不存在：${shotId}` };
+  const root = projectDir(ctx.project.id);
+  const clear = args.clear === true;
+  const images = clear ? [] : args.images === undefined ? shot.referenceImages ?? [] : parseReferenceImages(args.images);
+  const videos = clear ? [] : args.videos === undefined ? shot.referenceVideos ?? [] : parseReferenceVideos(args.videos);
+  const firstFrame = clear ? undefined : args.firstFrame === undefined ? shot.firstFrame : optString(args, "firstFrame");
+  const lastFrame = clear ? undefined : args.lastFrame === undefined ? shot.lastFrame : optString(args, "lastFrame");
+  const paths = [firstFrame, lastFrame, ...images.map(image => image.path), ...videos.map(video => video.path)].filter((path): path is string => Boolean(path));
+  for (const path of paths) {
+    if (!(await exists(safeJoin(root, path)))) throw new Error(`素材不存在：${path}`);
+  }
+  const changed = clear || args.images !== undefined || args.videos !== undefined || args.firstFrame !== undefined || args.lastFrame !== undefined;
+  shot.referenceImages = images;
+  shot.referenceVideos = videos;
+  shot.firstFrame = firstFrame;
+  shot.lastFrame = lastFrame;
+  if (changed) {
+    shot.status = "planned";
+    shot.video = undefined;
+    shot.videoId = undefined;
+    shot.prompt = undefined;
+    shot.promptMode = undefined;
+    shot.error = undefined;
+    // 参考素材变了，让 prepareReferences 按新素材重新选模式，而不是沿用旧的强制模式。
+    shot.generationMode = "auto";
+  }
+  shot.updatedAt = nowIso();
+  await ctx.save();
+  return {
+    ok: true,
+    shotId,
+    references: {
+      images,
+      videos,
+      firstFrame,
+      lastFrame,
+    },
   };
 }
 
@@ -658,7 +761,17 @@ async function listAssets(ctx: ToolContext) {
     ok: true,
     stage: ctx.project.stage,
     assets: ctx.project.assets.slice(-40),
-    plan: ctx.project.plan.map(shot => ({ id: shot.id, title: shot.title, status: shot.status, video: shot.video, promptMode: shot.promptMode })),
+    plan: ctx.project.plan.map(shot => ({
+      id: shot.id,
+      title: shot.title,
+      status: shot.status,
+      video: shot.video,
+      promptMode: shot.promptMode,
+      firstFrame: shot.firstFrame,
+      lastFrame: shot.lastFrame,
+      referenceImages: shot.referenceImages ?? [],
+      referenceVideos: shot.referenceVideos ?? [],
+    })),
     files: { project: `projects/${ctx.project.id}/project.json`, bible: ctx.project.styleBible ? "learning/styleBible.md" : undefined },
   };
 }
@@ -762,6 +875,7 @@ const handlers: Record<string, (ctx: ToolContext, args: Args) => Promise<unknown
   export_skills: exportSkillsTool,
   update_style_bible: updateBible,
   plan_shots: planShots,
+  set_shot_references: setShotReferences,
   build_shot_prompt: buildPrompt,
   generate_shot: generateShotTool,
   generate_still: generateStillTool,

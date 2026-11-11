@@ -5,7 +5,7 @@ import { getManifest } from "../store/projects";
 import { normalizeStyleBible } from "../learn/bible";
 
 export type ReferenceImage = { path: string; label: string; role: "subject" | "location" };
-export type ReferenceVideo = { path: string; label: string; shotId: string };
+export type ReferenceVideo = { path: string; label: string; shotId?: string };
 
 export type PreparedReferences = {
   mode: PromptMode;
@@ -36,21 +36,35 @@ export async function prepareReferences(project: Project, shot: ShotPlan): Promi
     }
   }
 
+  for (const reference of shot.referenceImages ?? []) {
+    images.push({
+      path: reference.path,
+      label: reference.label || (reference.role === "subject" ? "the subject in the uploaded reference image" : "the location in the uploaded reference image"),
+      role: reference.role,
+    });
+  }
+
   const manifest = await getManifest(project);
   const videos: ReferenceVideo[] = [];
   for (const shotId of shot.referenceShotIds) {
     const source = manifest?.shots.find(item => item.id === shotId);
     if (source?.clip) videos.push({ path: source.clip, label: `${shotId} camera movement and pacing reference`, shotId });
   }
+  for (const reference of shot.referenceVideos ?? []) {
+    videos.push({ path: reference.path, label: reference.label || "user-uploaded reference video" });
+  }
 
+  const uniqueImages = [...new Map(images.map(image => [image.path, image])).values()].slice(0, 4);
+  const uniqueVideos = [...new Map(videos.map(video => [video.path, video])).values()].slice(0, 3);
+  const hasExplicitReferences = Boolean((shot.referenceImages?.length ?? 0) || (shot.referenceVideos?.length ?? 0));
   const forced = shot.generationMode && shot.generationMode !== "auto" ? shot.generationMode : undefined;
   if (forced === "t2va") return { mode: "t2va", images: [], videos: [] };
   if (forced === "ref2va") {
-    if (!images.length && !videos.length) throw new Error("Ref2VA 需要至少一张参考图或一段参考视频");
-    return { mode: "ref2va", images: images.slice(0, 4), videos: videos.slice(0, 3) };
+    if (!uniqueImages.length && !uniqueVideos.length) throw new Error("Ref2VA 需要至少一张参考图或一段参考视频");
+    return { mode: "ref2va", images: uniqueImages, videos: uniqueVideos };
   }
   if (forced === "i2va") {
-    const firstFrame = shot.firstFrame ?? images.find(image => image.role === "subject")?.path ?? images[0]?.path;
+    const firstFrame = shot.firstFrame ?? uniqueImages.find(image => image.role === "subject")?.path ?? uniqueImages[0]?.path;
     if (!firstFrame) throw new Error("I2VA 需要首帧图片");
     return { mode: "i2va", firstFrame, images: [], videos: [] };
   }
@@ -63,16 +77,16 @@ export async function prepareReferences(project: Project, shot: ShotPlan): Promi
     return { mode: "l2va", lastFrame: shot.lastFrame, images: [], videos: [] };
   }
   if (shot.firstFrame) {
-    return { mode: shot.lastFrame ? "fl2va" : "i2va", firstFrame: shot.firstFrame, lastFrame: shot.lastFrame, images, videos: [] };
+    return { mode: shot.lastFrame ? "fl2va" : "i2va", firstFrame: shot.firstFrame, lastFrame: shot.lastFrame, images: uniqueImages, videos: [] };
   }
-  if (videos.length) {
-    return { mode: "ref2va", images: images.slice(0, 4), videos: videos.slice(0, 3) };
+  if (uniqueVideos.length || (hasExplicitReferences && uniqueImages.length)) {
+    return { mode: "ref2va", images: uniqueImages, videos: uniqueVideos };
   }
-  const firstImage = images.find(image => image.role === "subject") ?? images[0];
+  const firstImage = uniqueImages.find(image => image.role === "subject") ?? uniqueImages[0];
   if (firstImage) {
-    return { mode: "i2va", firstFrame: firstImage.path, images, videos: [] };
+    return { mode: "i2va", firstFrame: firstImage.path, images: uniqueImages, videos: [] };
   }
-  return { mode: "t2va", images, videos: [] };
+  return { mode: "t2va", images: uniqueImages, videos: uniqueVideos };
 }
 
 export function alignmentLine(mode: PromptMode, duration: number) {
@@ -160,7 +174,8 @@ export function buildPromptSkeleton(input: {
       : clip(`<Picture ${index + 1}> is the reference still defining this location: ${image.label}.`, 300));
   });
   references.videos.forEach((video, index) => {
-    definitions.push(`<Video ${index + 1}> is the reference video providing camera movement, framing rhythm and pacing from shot ${video.shotId}; do not copy its subject identity.`);
+    const origin = video.shotId ? `from shot ${video.shotId}` : "from a user-uploaded reference";
+    definitions.push(`<Video ${index + 1}> is the reference video ${origin} providing camera movement, framing rhythm and pacing; do not copy its subject identity.`);
   });
   const retention = [
     ...subjects.map((_, index) => `<Subject ${index + 1}>: fully_preserved`),

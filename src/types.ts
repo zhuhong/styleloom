@@ -162,6 +162,25 @@ export type StyleBible = {
 
 export type ShotStatus = "planned" | "promptReady" | "generating" | "done" | "failed";
 
+export type ShotReferenceImage = {
+  path: string;
+  role: "subject" | "location";
+  label?: string;
+};
+
+export type ShotReferenceVideo = {
+  path: string;
+  label?: string;
+};
+
+export type ChatAttachment = {
+  path: string;
+  label: string;
+  kind: "image" | "video";
+  mimeType?: string;
+  size?: number;
+};
+
 export type ShotPlan = {
   id: string;
   index: number;
@@ -183,6 +202,10 @@ export type ShotPlan = {
   generationMode?: GenerationMode;
   firstFrame?: string;
   lastFrame?: string;
+  /** 用户上传或项目内图片，作为 Ref2VA 参考图 */
+  referenceImages?: ShotReferenceImage[];
+  /** 用户上传或项目内视频，作为 Ref2VA 参考视频 */
+  referenceVideos?: ShotReferenceVideo[];
   status: ShotStatus;
   prompt?: string;
   promptMode?: PromptMode;
@@ -195,7 +218,7 @@ export type ShotPlan = {
 export type PromptMode = "t2va" | "i2va" | "fl2va" | "l2va" | "ref2va";
 export type GenerationMode = PromptMode | "auto";
 
-export type AssetKind = "still" | "video" | "frame" | "clip" | "audio" | "source";
+export type AssetKind = "still" | "video" | "frame" | "clip" | "audio" | "source" | "upload";
 
 export type AssetRecord = {
   id: string;
@@ -232,7 +255,7 @@ export type ProjectSummary = {
 };
 
 export type AgentEvent =
-  | { type: "message"; role: "user" | "assistant"; content: string }
+  | { type: "message"; role: "user" | "assistant"; content: string; attachments?: ChatAttachment[] }
   | { type: "tool_start"; id: string; name: string; args: unknown }
   | { type: "tool_end"; id: string; name: string; ok: boolean; preview: string; elapsedMs: number }
   | { type: "progress"; scope: string; percent: number; label: string }
