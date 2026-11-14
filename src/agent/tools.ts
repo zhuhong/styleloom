@@ -751,6 +751,7 @@ async function generateStillTool(ctx: ToolContext, args: Args) {
     id: reqString(args, "id"),
     promptOverride: optString(args, "prompt"),
     signal: ctx.signal,
+    onProgress: (percent, label) => ctx.emit({ type: "progress", scope: "generate_still", percent, label }),
   });
   ctx.emit({ type: "state", project: ctx.project });
   return { ok: true, ...result };

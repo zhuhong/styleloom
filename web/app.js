@@ -877,7 +877,7 @@ function renderEngineState() {
     settings.llm?.model ? "LLM" : null,
     settings.llm?.visionModel ? "VLM" : null,
     settings.video?.apiKey ? "H3" : null,
-    settings.image?.model ? "图片" : null,
+    settings.image?.model || (settings.image?.local?.host && settings.image?.local?.script) ? "图片" : null,
   ].filter(Boolean);
   els.engineState.textContent = flags.length ? `已配置：${flags.join(" · ")}` : "尚未配置模型";
   els.engineState.className = `engineState ${flags.length >= 3 ? "ok" : "warn"}`;

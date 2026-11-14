@@ -25,10 +25,22 @@
   },
   "image": {
     "api": "auto",
-    "baseUrl": "",
+    "baseUrl": "https://openrouter.ai/api/v1",
     "apiKey": "",
-    "model": "",
-    "size": "2K"
+    "model": "qwen/qwen-image-2.1-turbo",
+    "size": "2K",
+    "local": {
+      "host": "5090",
+      "sshBin": "ssh",
+      "scpBin": "scp",
+      "pythonBin": "/home/zhuh/miniconda3/envs/diffsynth/bin/python",
+      "script": "/home/zhuh/source_code/diffsynth_run/qwen_image_gen2.py",
+      "workdir": "/home/zhuh/source_code/diffsynth_run",
+      "shortEdge": 768,
+      "steps": 8,
+      "vram": "offload",
+      "timeoutMs": 900000
+    }
   },
   "xhs": {
     "ytDlpPath": "yt-dlp",

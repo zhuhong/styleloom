@@ -87,7 +87,8 @@ Everything lives in `data/settings.json` (or the in-app **Settings** dialog). `d
 | `llm.visionModel` | Model that accepts images (default `deepseek-v4.1-flash`); Gemini etc. work too |
 | `video.baseUrl` / `apiKey` | icompify open platform, default `https://api.icompify.com` |
 | `video.model` / `referenceModel` | `minimax-h3-fl2va` (text / first-last frame), `minimax-h3-ref2va` (reference image / video) |
-| `image.*` | Optional OpenAI-compatible `/images/generations` or OpenRouter `/images`, for stills. Leave empty to fall back to reference keyframes |
+| `image.*` | Stills backend. `image.api=local` renders on the LAN **RTX 5090** (Qwen-Image-2.1-Turbo over SSH, free); `openrouter` / `openai` use a remote image API; `auto` prefers the 5090 and falls back. Empty → reference keyframes. See [docs/5090-image.md](docs/5090-image.md) |
+| `image.local.*` | `host`, `pythonBin`, `script`, `workdir`, `shortEdge` (768), `steps` (8), `vram` (`offload`) |
 | `xhs.*` | `ytDlpPath`, `cookiesFromBrowser` (chrome / safari / firefox / edge / empty), referer, UA, timeout |
 | `ffmpeg.*` | Binary paths, default `ffmpeg` / `ffprobe` |
 | `learning.*` | Scene threshold, minimum shot length, max shots, samples per shot, keep clips |
@@ -173,12 +174,12 @@ src/
 ├── agent/                conversation loop, system prompt, 23 tool handlers
 ├── learn/                slice → annotate → distill → extract skills → orchestrate
 ├── generate/             reference decision, H3 prompt, single shot, stills
-├── providers/            llm / image / download(xhs) / video(icompify) — protocol only
+├── providers/            llm / image (+5090 SSH backend) / download(xhs) / video(icompify) — protocol only
 ├── store/                projects, manifests, sessions, style packs, skills
-└── util/                 fs, ffmpeg and duration primitives
+└── util/                 fs, ffmpeg, ssh and duration primitives
 web/                      dependency-free HTML/CSS/JS front end
 skills/                    public read-only skill library (knowledge only, no evidence images)
-docs/                     skills, xhs download, H3 prompting, examples
+docs/                     skills, xhs download, 5090 image, H3 prompting, examples
 ```
 
 Data on disk (`data/`, ignored by git):
@@ -210,13 +211,14 @@ Verified end to end:
 - Front-end media lightbox: keyframes, stills, skill evidence and generated videos open in an in-page dialog (image / video / audio) with backdrop and ESC close; no new tab.
 - Chat Markdown: assistant messages render headings, lists, tables, fenced code and safe links in-page; raw HTML is escaped and dangerous URLs are rejected.
 - Chat uploads: images/videos can be attached or dragged into the composer, stored under `assets/uploads/`, kept in session history, and bound to a shot via `set_shot_references` (images → Ref2VA, first/last frames → I2VA/FL2VA).
+- 5090 local image backend: `generate_still` shells out over SSH to `qwen_image_gen2.py`, uploads up to 3 reference frames with scp, downloads the PNG back and records `backend/model/references` on the asset. Verified with a fake `ssh`/`scp` pair (argument quoting and remote temp-dir cleanup checked); a real 5090 run is pending because the machine was unreachable (`192.168.0.121:22` refused).
 - One real billed H3 T2VA render: 9s, 9:16, 768×1344, with audio, ~141s queue+inference; a VLM three-frame check rated it "highly consistent" with minor camera drift and a slight finger/frame fusion.
 - One real billed H3 Ref2VA render from a character still + an empty location still: 9s, 9:16, 768×1344, with audio, ~248s; the VLM check rated identity, room and framing "highly consistent", with no crop or drift and only minor hand/switch-panel artifacts.
 - A second reference (120s Xiaohongshu climbing video, 16 shots): 8 skills extracted; a 9s Ref2VA climbing shot rendered in ~248s and rated "highly consistent" for action, identity and gym layout; five camera/lighting/color skills moved to `active` (0.80).
 - Timeline stitching: `stitch_shots` normalizes clips with ffmpeg, then hard-cuts or crossfades into a final H.264/AAC asset. Verified on the 4-shot `名画上街` project: 20.73s hard cut, 19.84s with a 0.3s crossfade.
 - Short-shot handling: `plan_shots` accepts 1–15s; local 4s→2s trim is verified with ffmpeg. H3's 2/3s direct tier is exposed via `experimentalDuration=true` but has not been paid-tested yet.
 
-Not yet verified: real I2VA / FL2VA renders (request shape mirrors the Toonflow provider; T2VA and Ref2VA are proven), and H3's direct 2/3s tier (the local 4s+trim fallback is verified with a mocked provider).
+Not yet verified: real I2VA / FL2VA renders (request shape mirrors the Toonflow provider; T2VA and Ref2VA are proven), H3's direct 2/3s tier (the local 4s+trim fallback is verified with a mocked provider), and a real 5090 Qwen render through this project (the SSH path is verified against a stub, not the GPU).
 
 ## Limitations
 
@@ -225,7 +227,8 @@ Not yet verified: real I2VA / FL2VA renders (request shape mirrors the Toonflow 
 - Skills are retrieved lexically, not by embedding.
 - Basic assembly is implemented (hard cut / crossfade), but subtitles, complex transitions, audio mixing and multi-track editing are not.
 - H3's shorter 2/3s tiers are experimental; the safe default is 4s generation plus local trim.
-- The image provider is text-to-image only; no image editing or reference-image conditioning.
+- Remote image APIs are text-to-image only. Reference-image conditioning works only on the 5090 backend, which feeds up to 3 frames through `--ref`.
+- Each 5090 still is its own process, so the ~31GB pipeline is loaded per image (~20–60s); batch dozens of stills on the 5090 itself or via `diffsynthGateway.py`.
 - Applying a style pack copies only referenced images and clips, not the source project's shot plan.
 - Chat Markdown is a small subset: no math, footnotes or raw HTML; raw HTML is shown as text.
 - Chat uploads are capped at 6 files per message, 20MB per image and 140MB per video; SVG is rejected.
@@ -237,7 +240,7 @@ Not yet verified: real I2VA / FL2VA renders (request shape mirrors the Toonflow 
 - Vector skill retrieval plus feedback-driven rule rewriting
 - Multi-track timeline editing, subtitles and audio mixing
 - Reusing reference audio / dialogue-driven lip sync
-- Reference-image editing for stronger character consistency
+- A persistent 5090 queue (reuse `diffsynthGateway.py`) so stills batch without per-image model loads
 - Style pack browsing, diffing and incremental merge
 - Rendered-output QA (first/last frame drift, identity drift, camera amplitude)
 
@@ -246,6 +249,7 @@ Not yet verified: real I2VA / FL2VA renders (request shape mirrors the Toonflow 
 - [Skill library](docs/skills.md) — lifecycle, matching, confidence
 - [Xiaohongshu download](docs/xhs-download.md) — login state, failure modes
 - [H3 prompting](docs/h3-prompting.md) — official prompt structure
+- [5090 local Qwen](docs/5090-image.md) — SSH setup, settings, self-check
 - [Architecture](ARCHITECTURE.md) — request lifecycle and design rationale
 - Examples: [style bible](docs/examples/style-bible-example.md) · [Ref2VA prompt](docs/examples/ref2va-prompt-example.txt) · [skill](docs/examples/skill-example.md) · [generated shot](docs/examples/generated-shot-example.md) · [Ref2VA with stills](docs/examples/ref2va-with-stills-example.md) · [climbing shot](docs/examples/xhs-climbing-example.md)
 

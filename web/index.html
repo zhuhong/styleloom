@@ -100,11 +100,26 @@
         </section>
         <section>
           <h3>图片模型（定妆照 / 场景照，可选）</h3>
-          <label>接口类型<input name="image.api" placeholder="auto / openai / openrouter" /></label>
+          <label>接口类型<input name="image.api" placeholder="auto / local / openrouter / openai" /></label>
           <label>请求地址<input name="image.baseUrl" placeholder="OpenAI 兼容 /v1 或 OpenRouter /v1" /></label>
           <label>API Key<input name="image.apiKey" type="password" /></label>
-          <label>模型<input name="image.model" placeholder="例如 qwen-image-2.1-turbo" /></label>
-          <label>尺寸<input name="image.size" placeholder="1344x768" /></label>
+          <label>模型<input name="image.model" placeholder="例如 qwen/qwen-image-2.1-turbo" /></label>
+          <label>尺寸<input name="image.size" placeholder="2K 或 1344x768" /></label>
+          <p class="dialogHint">接口类型填 <code>local</code> 只走 5090；填 <code>auto</code> 会优先探测 5090，不可达再回退远程。5090 免费，远程按张计费。</p>
+        </section>
+        <section>
+          <h3>5090 本地 Qwen（走 SSH，可选）</h3>
+          <label>SSH 主机<input name="image.local.host" placeholder="5090" /></label>
+          <label>SSH 命令<input name="image.local.sshBin" placeholder="ssh" /></label>
+          <label>SCP 命令<input name="image.local.scpBin" placeholder="scp" /></label>
+          <label>Python 路径<input name="image.local.pythonBin" placeholder="/home/zhuh/miniconda3/envs/diffsynth/bin/python" /></label>
+          <label>远程脚本<input name="image.local.script" placeholder="/home/zhuh/source_code/diffsynth_run/qwen_image_gen2.py" /></label>
+          <label>工作目录<input name="image.local.workdir" placeholder="/home/zhuh/source_code/diffsynth_run" /></label>
+          <label>输出短边<input name="image.local.shortEdge" placeholder="768" /></label>
+          <label>去噪步数<input name="image.local.steps" placeholder="8" /></label>
+          <label>显存模式<input name="image.local.vram" placeholder="offload / auto / cuda" /></label>
+          <label>超时 ms<input name="image.local.timeoutMs" placeholder="900000" /></label>
+          <p class="dialogHint">远程脚本需已部署 <code>qwen_image_gen2.py</code>；短边 768 = 16:9 输出约 1344×768。</p>
         </section>
         <div class="dialogActions">
           <button value="cancel" class="ghost">取消</button>

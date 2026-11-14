@@ -343,7 +343,8 @@ code { background: #1f2733; padding: 1px 5px; border-radius: 5px; font-size: 12p
 .statusDot.candidate { background: #fbbf24; }
 .statusDot.deprecated { background: var(--danger); }
 
-.settingsDialog { width: min(640px, calc(100vw - 40px)); border: 1px solid var(--line); border-radius: 16px; background: var(--panel); color: var(--text); padding: 22px; }
+.settingsDialog { width: min(720px, calc(100vw - 40px)); max-height: calc(100vh - 40px); overflow-y: auto; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); color: var(--text); padding: 22px; }
+.settingsDialog form { overflow: visible; }
 .settingsDialog::backdrop { background: rgba(0, 0, 0, 0.6); }
 .settingsDialog h2 { margin: 0 0 4px; font-size: 18px; }
 .dialogHint { color: var(--muted); font-size: 12px; margin: 0 0 16px; }

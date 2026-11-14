@@ -23,7 +23,27 @@ export type Settings = {
     pollIntervalMs: number;
     maxWaitMs: number;
   };
-  image: { api: "auto" | "openai" | "openrouter"; baseUrl: string; apiKey: string; model: string; size: string };
+  image: {
+    api: "auto" | "openai" | "openrouter" | "local";
+    baseUrl: string;
+    apiKey: string;
+    model: string;
+    size: string;
+    /** 5090 本地 Qwen-Image-2.1-Turbo，通过 SSH 调用远程 qwen_image_gen2.py。 */
+    local: {
+      host: string;
+      sshBin: string;
+      scpBin: string;
+      pythonBin: string;
+      script: string;
+      workdir: string;
+      /** 输出短边，长边按画幅比例推算；默认 16:9 = 1344x768。 */
+      shortEdge: number;
+      steps: number;
+      vram: "auto" | "cuda" | "offload";
+      timeoutMs: number;
+    };
+  };
   xhs: {
     ytDlpPath: string;
     /** chrome / safari / firefox / edge；留空表示不读取浏览器 Cookie */
@@ -69,7 +89,25 @@ export const defaultSettings: Settings = {
     pollIntervalMs: 10000,
     maxWaitMs: 3600000,
   },
-  image: { api: "auto", baseUrl: "", apiKey: "", model: "", size: "2K" },
+  image: {
+    api: "auto",
+    baseUrl: "",
+    apiKey: "",
+    model: "",
+    size: "2K",
+    local: {
+      host: "",
+      sshBin: "ssh",
+      scpBin: "scp",
+      pythonBin: "/home/zhuh/miniconda3/envs/diffsynth/bin/python",
+      script: "/home/zhuh/source_code/diffsynth_run/qwen_image_gen2.py",
+      workdir: "/home/zhuh/source_code/diffsynth_run",
+      shortEdge: 768,
+      steps: 8,
+      vram: "offload",
+      timeoutMs: 900_000,
+    },
+  },
   xhs: {
     ytDlpPath: "yt-dlp",
     cookiesFromBrowser: "chrome",
@@ -109,6 +147,12 @@ export function normalizeSettings(input: unknown): Settings {
   settings.video.steps = Number(settings.video.steps) || defaultSettings.video.steps;
   settings.video.pollIntervalMs = Number(settings.video.pollIntervalMs) || defaultSettings.video.pollIntervalMs;
   settings.video.maxWaitMs = Number(settings.video.maxWaitMs) || defaultSettings.video.maxWaitMs;
+  if (!settings.image.local || typeof settings.image.local !== "object") settings.image.local = { ...defaultSettings.image.local };
+  settings.image.local.shortEdge = Math.min(2048, Math.max(256, Number(settings.image.local.shortEdge) || defaultSettings.image.local.shortEdge));
+  settings.image.local.steps = Math.min(50, Math.max(1, Number(settings.image.local.steps) || defaultSettings.image.local.steps));
+  settings.image.local.timeoutMs = Math.max(30_000, Number(settings.image.local.timeoutMs) || defaultSettings.image.local.timeoutMs);
+  if (!["auto", "cuda", "offload"].includes(settings.image.local.vram)) settings.image.local.vram = defaultSettings.image.local.vram;
+  if (!["auto", "openai", "openrouter", "local"].includes(settings.image.api)) settings.image.api = "auto";
   settings.learning.sceneThreshold = Number(settings.learning.sceneThreshold) || defaultSettings.learning.sceneThreshold;
   settings.learning.maxShots = Math.min(200, Math.max(1, Number(settings.learning.maxShots) || defaultSettings.learning.maxShots));
   settings.learning.sampleCount = Math.min(3, Math.max(1, Number(settings.learning.sampleCount) || defaultSettings.learning.sampleCount));

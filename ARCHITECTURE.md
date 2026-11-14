@@ -177,7 +177,7 @@ Agent 在规划前 `search_skills`、命中后 `read_skill`，把 prompt fragmen
 | `plan_shots` | 写入分镜，可带 referenceImages/referenceVideos | 无 |
 | `set_shot_references` | 把项目内图片/视频绑定到分镜（Ref2VA/I2VA/FL2VA） | 无 |
 | `build_shot_prompt` | 生成并校验 H3 提示词 | 文本模型 |
-| `generate_still` | 定妆照/场景照（可回退参考帧） | 图片模型 |
+| `generate_still` | 定妆照/场景照（5090 本地 / 远程接口 / 回退参考帧） | 5090 免费；远程按张计费 |
 | `generate_shot` | H3 生成单镜（需确认） | **视频计费** |
 | `stitch_shots` | 统一转码后拼接分镜（硬切/叠化），输出成片 | 无（本地 ffmpeg） |
 | `list_assets` | 查看状态 | 无 |
@@ -189,7 +189,8 @@ Agent 在规划前 `search_skills`、命中后 `read_skill`，把 prompt fragmen
 
 - **换文本/视觉模型**：只改 `settings.json`。任何 OpenAI 兼容网关都能用；工具调用需要网关支持 `tools`。
 - **换视频供应商**：实现 `generateVideoJob` 同签名函数，或在 `providers/video/` 增加分支。
-- **换图片供应商**：`providers/image.ts` 支持 OpenAI `/images/generations` 与 OpenRouter `/images`（Qwen Image），通过 `image.api` 切换；返回 `{ bytes, mimeType, model }`。
+- **换图片供应商**：`providers/image.ts` 有四个分支——OpenAI `/images/generations`、OpenRouter `/images`、以及 5090 本地（SSH 调 `qwen_image_gen2.py`，scp 传参考图与产物），通过 `image.api` 切换；统一返回 `{ bytes, mimeType, model, backend }`。
+- **5090 出图链路**：`resolveImageBackend` 决定后端（`local` 直连；`auto` 先 `ssh true` 探活再回退远程）→ `withRemoteWorkdir` 建 `remote_outputs/videocopy-<tag>/` → `scpToRemote` 传最多 3 张条件图 → `sshRun` 执行脚本 → `fetchRemoteFile` 拉回 PNG → `finally` 删除远端目录。只支持「出一张图」，不做任务排队；需要并发/批量时改用 `../5090_H3/remote/diffsynthGateway.py`。
 - **加镜头技能**（例如口型、音乐、转场）：新工具 + `agent/prompt.ts` 里的流程说明；重活放到 `src/generate/`。
 - **接工作流画布**：`styleBible`、`slice.json`、`plan[]` 都是稳定 JSON，可直接映射到节点/连线。
 - **换技能检索**：`store/skills.ts` 的 `searchSkills` 是唯一检索入口，可替换为 embedding/向量库而不影响工具层。

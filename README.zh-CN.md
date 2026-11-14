@@ -84,7 +84,8 @@ bun start
 | `llm.visionModel` | 支持图片输入的模型（默认 `deepseek-v4.1-flash`），Gemini 等也可 |
 | `video.baseUrl` / `apiKey` | icompify 开放平台，默认 `https://api.icompify.com` |
 | `video.model` / `referenceModel` | `minimax-h3-fl2va`（文生 / 首尾帧）、`minimax-h3-ref2va`（参考图 / 参考视频） |
-| `image.*` | 可选。OpenAI 兼容 `/images/generations` 或 OpenRouter `/images`，用于定妆照；留空则回退参考帧 |
+| `image.*` | 定妆照后端。`image.api=local` 走局域网 **RTX 5090**（Qwen-Image-2.1-Turbo，SSH 调用，免费）；`openrouter` / `openai` 走远程图片接口；`auto` 优先 5090、不可达再回退。留空则回退参考帧。见 [docs/5090-image.md](docs/5090-image.md) |
+| `image.local.*` | `host`、`pythonBin`、`script`、`workdir`、`shortEdge`（768）、`steps`（8）、`vram`（`offload`） |
 | `xhs.*` | `ytDlpPath`、`cookiesFromBrowser`（chrome / safari / firefox / edge / 留空）、referer、UA、超时 |
 | `ffmpeg.*` | 二进制路径，默认 `ffmpeg` / `ffprobe` |
 | `learning.*` | 切镜阈值、最短镜头、最多镜头数、每镜采样帧数、是否保留片段 |
@@ -170,12 +171,12 @@ src/
 ├── agent/                对话循环、系统提示词、23 个工具
 ├── learn/                切片 → 标注 → 归纳 → 抽技能 → 编排
 ├── generate/             参考决策、H3 提示词、单镜生成、定妆照
-├── providers/            llm / image / download(xhs) / video(icompify)，只做协议转换
+├── providers/            llm / image（含 5090 SSH 后端）/ download(xhs) / video(icompify)，只做协议转换
 ├── store/                项目、manifest、会话、风格包、技能
-└── util/                 文件、ffmpeg 与时长原语
+└── util/                 文件、ffmpeg、ssh 与时长原语
 web/                      无构建步骤的原生前端
 skills/                   公开只读技能库（仅知识，不含证据图）
-docs/                     技能、小红书下载、H3 提示词、示例
+docs/                     技能、小红书下载、5090 出图、H3 提示词、示例
 ```
 
 磁盘上的数据（`data/`，已被 git 忽略）：
@@ -207,13 +208,14 @@ data/
 - 前端素材灯箱：关键帧、定妆照、技能证据与成片在页内弹窗查看（图片 / 视频 / 音频），支持遮罩与 ESC 关闭，不再跳新页面。
 - 对话 Markdown：助手消息在页内渲染标题、列表、表格、围栏代码块与安全链接；原始 HTML 会被转义，危险 URL 会被拒绝。
 - 聊天上传：图片/视频可附加或拖入输入框，保存到 `assets/uploads/`，随会话历史保留；用 `set_shot_references` 绑定到分镜（图片走 Ref2VA，首/尾帧走 I2VA/FL2VA）。
+- 5090 本地出图后端：`generate_still` 通过 SSH 调 `qwen_image_gen2.py`，先用 scp 上传最多 3 张参考帧，再把 PNG 拉回，并在素材上记录 `backend/model/references`。已用假的 `ssh`/`scp` 验证整条链路（参数拼装、单引号转义、远端临时目录清理）；真实 5090 出图待验证——当前 `192.168.0.121:22` 拒绝连接，无法实测。
 - 一次真实计费 H3 T2VA 出片：9 秒、9:16、768×1344、含音轨，排队+推理约 141 秒；VLM 三帧质检判定"高度符合"，仅有轻微机位漂移与手指/画框轻微融合。
 - 一次真实计费 H3 Ref2VA 出片：人物定妆照 + 空场景照两张参考图，9 秒、9:16、768×1344、含音轨，约 248 秒；VLM 质检判定身份/房间/构图"高度符合"，无裁切/漂移，仅手部与墙面开关面板有轻微偏差。
 - 第二条参考片（120 秒小红书攀岩视频，16 镜）：抽取 8 条技能；9 秒 Ref2VA 攀岩镜头约 248 秒出片，VLM 判定动作、身份、馆内布局"高度符合"；5 条运镜/灯光/色彩技能升为 active（0.80）。
 - 整片拼接：`stitch_shots` 先统一转码，再硬切/叠化输出 H.264/AAC 成片；已在「名画上街」4 镜项目验证（硬切 20.73 秒，0.3 秒叠化 19.84 秒）。
 - 短镜头：`plan_shots` 接受 1–15 秒；4 秒→2 秒本地裁剪已用 ffmpeg 验证；H3 的 2/3 秒直发档位通过 `experimentalDuration=true` 暴露，但尚未做真实计费测试。
 
-尚未验证：I2VA / FL2VA 的真实出片（请求格式与 Toonflow provider 一致，T2VA、Ref2VA 已跑通）；H3 的 2/3 秒直发档位（本地 4 秒+裁剪回退已用 mock provider 验证）。
+尚未验证：I2VA / FL2VA 的真实出片（请求格式与 Toonflow provider 一致，T2VA、Ref2VA 已跑通）；H3 的 2/3 秒直发档位（本地 4 秒+裁剪回退已用 mock provider 验证）；本项目经 5090 的真实 Qwen 出图（SSH 链路已验证，GPU 未实测）。
 
 ## 已知限制
 
@@ -222,7 +224,8 @@ data/
 - 技能检索是词法匹配，不是向量检索。
 - 已支持基础整片拼接（硬切 / 叠化），但字幕、复杂转场、混音与多轨编辑未实现。
 - H3 的 2/3 秒短档位属于实验能力；安全默认是 4 秒生成后本地裁剪。
-- 图片模型只支持文生图，未接图生图 / 参考图编辑。
+- 远程图片接口只支持文生图；参考图条件只有 5090 后端支持（通过 `--ref` 传最多 3 张）。
+- 5090 每张定妆照都是独立进程，约 31GB 的 pipeline 每次都要重新加载（约 20–60 秒/张）；批量出图请直接在 5090 侧用 `--batch` 或 `diffsynthGateway.py`。
 - 套用风格包只复制被引用的图片与片段，不复制原项目分镜。
 - 对话 Markdown 是轻量实现：不支持数学公式、脚注与原始 HTML；原始 HTML 会按文本显示。
 - 聊天上传单次最多 6 个文件，图片 ≤20MB、视频 ≤140MB；不支持 SVG。
@@ -243,6 +246,7 @@ data/
 - [技能库](docs/skills.md) —— 生命周期、匹配、置信度
 - [小红书下载](docs/xhs-download.md) —— 登录态与失败分支
 - [H3 提示词](docs/h3-prompting.md) —— 官方提示词结构
+- [5090 本地出图](docs/5090-image.md) —— SSH 配置、设置项与自检
 - [架构说明](ARCHITECTURE.md) —— 请求生命周期与设计取舍
 - 示例：[风格圣经](docs/examples/style-bible-example.md) · [Ref2VA 提示词](docs/examples/ref2va-prompt-example.txt) · [技能](docs/examples/skill-example.md) · [真实出片](docs/examples/generated-shot-example.md) · [Ref2VA 定妆照版](docs/examples/ref2va-with-stills-example.md) · [攀岩同款](docs/examples/xhs-climbing-example.md)
 
