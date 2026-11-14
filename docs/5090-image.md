@@ -69,6 +69,17 @@ bun -e 'import { checkImageBackend } from "./src/providers/imageCheck"; console.
 bun -e 'import { probeLocalImage } from "./src/providers/imageCheck"; console.log(await probeLocalImage())'
 ```
 
+## 实测
+
+2026-11-14，RTX 5090 / 1344×768 / 8 步 / `offload`：
+
+| 输入 | 设备内耗时 | 端到端墙钟 | 产物 |
+| --- | --- | --- | --- |
+| 纯文生 | 38.8s | 70.8s | 1.4MB PNG |
+| 1 张条件图 | 42.2s | 58.8s | 1.2MB PNG |
+
+端到端包含 SSH 建目录、scp 上传/下载与远端进程启动；GPU 显存回到约 655MiB 基线。
+
 ## 条件图
 
 `generate_still` 会从角色/场景的 `refImages`（学习阶段抽出的真实参考帧）优先取最多 3 张，找不到时再用已生成的 `stillImages`，通过 `qwen_image_gen2.py --ref` 传给 5090。这是 text-encoder 的 vision 条件通道，不做 img2img 加噪，所以人物、服装、背景能保留，只按 prompt 改姿态。

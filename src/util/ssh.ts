@@ -60,11 +60,11 @@ async function scp(scpBin: string, args: string[], options: SshOptions = {}) {
 }
 
 export async function scpToRemote(scpBin: string, host: string, localPath: string, remotePath: string, options: SshOptions = {}) {
-  await scp(scpBin, [localPath, `${host}:${shellQuote(remotePath)}`], options);
+  await scp(scpBin, [localPath, `${host}:${remotePath}`], options);
 }
 
 export async function scpFromRemote(scpBin: string, host: string, remotePath: string, localPath: string, options: SshOptions = {}) {
-  await scp(scpBin, [`${host}:${shellQuote(remotePath)}`, localPath], options);
+  await scp(scpBin, [`${host}:${remotePath}`, localPath], options);
 }
 
 /**
