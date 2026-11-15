@@ -12,7 +12,7 @@ export type Settings = {
     maxTokens: number;
   };
   video: {
-    provider: "icompify";
+    provider: "icompify" | "local";
     baseUrl: string;
     apiKey: string;
     model: string;
@@ -22,6 +22,14 @@ export type Settings = {
     steps: number;
     pollIntervalMs: number;
     maxWaitMs: number;
+    /** 本机 5090 上的 diffsynthGateway.py；provider=local 时生效。 */
+    local: {
+      baseUrl: string;
+      /** 网关启动时 --token 对应的口令，走 X-Toonflow-Gateway-Token 头。 */
+      token: string;
+      /** 输出短边，长边按画幅比例推算，并对齐 32。 */
+      shortEdge: number;
+    };
   };
   image: {
     api: "auto" | "openai" | "openrouter" | "local";
@@ -29,8 +37,13 @@ export type Settings = {
     apiKey: string;
     model: string;
     size: string;
-    /** 5090 本地 Qwen-Image-2.1-Turbo，通过 SSH 调用远程 qwen_image_gen2.py。 */
+    /** 5090 本地 Qwen-Image-2.1-Turbo：本机直连或 SSH 调用 qwen_image_gen2.py。 */
     local: {
+      /**
+       * auto = 本机存在脚本与 Python 就直连，否则配了 host 就走 SSH；
+       * direct = 只在本机 spawn；ssh = 只走 SSH 远端。
+       */
+      mode: "auto" | "direct" | "ssh";
       host: string;
       sshBin: string;
       scpBin: string;
@@ -88,6 +101,11 @@ export const defaultSettings: Settings = {
     steps: 50,
     pollIntervalMs: 10000,
     maxWaitMs: 3600000,
+    local: {
+      baseUrl: "http://127.0.0.1:8000",
+      token: "",
+      shortEdge: 480,
+    },
   },
   image: {
     api: "auto",
@@ -96,6 +114,7 @@ export const defaultSettings: Settings = {
     model: "",
     size: "2K",
     local: {
+      mode: "auto",
       host: "",
       sshBin: "ssh",
       scpBin: "scp",
@@ -147,7 +166,11 @@ export function normalizeSettings(input: unknown): Settings {
   settings.video.steps = Number(settings.video.steps) || defaultSettings.video.steps;
   settings.video.pollIntervalMs = Number(settings.video.pollIntervalMs) || defaultSettings.video.pollIntervalMs;
   settings.video.maxWaitMs = Number(settings.video.maxWaitMs) || defaultSettings.video.maxWaitMs;
+  if (!["icompify", "local"].includes(settings.video.provider)) settings.video.provider = defaultSettings.video.provider;
+  if (!settings.video.local || typeof settings.video.local !== "object") settings.video.local = { ...defaultSettings.video.local };
+  settings.video.local.shortEdge = Math.min(1024, Math.max(256, Number(settings.video.local.shortEdge) || defaultSettings.video.local.shortEdge));
   if (!settings.image.local || typeof settings.image.local !== "object") settings.image.local = { ...defaultSettings.image.local };
+  if (!["auto", "direct", "ssh"].includes(settings.image.local.mode)) settings.image.local.mode = defaultSettings.image.local.mode;
   settings.image.local.shortEdge = Math.min(2048, Math.max(256, Number(settings.image.local.shortEdge) || defaultSettings.image.local.shortEdge));
   settings.image.local.steps = Math.min(50, Math.max(1, Number(settings.image.local.steps) || defaultSettings.image.local.steps));
   settings.image.local.timeoutMs = Math.max(30_000, Number(settings.image.local.timeoutMs) || defaultSettings.image.local.timeoutMs);
@@ -181,7 +204,11 @@ export function maskSettings(settings: Settings) {
   return {
     ...settings,
     llm: { ...settings.llm, apiKey: settings.llm.apiKey ? mask : "" },
-    video: { ...settings.video, apiKey: settings.video.apiKey ? mask : "" },
+    video: {
+      ...settings.video,
+      apiKey: settings.video.apiKey ? mask : "",
+      local: { ...settings.video.local, token: settings.video.local.token ? mask : "" },
+    },
     image: { ...settings.image, apiKey: settings.image.apiKey ? mask : "" },
   };
 }
@@ -191,6 +218,7 @@ export function preserveSecrets(incoming: Settings, current: Settings): Settings
   const next = normalizeSettings(incoming);
   if (next.llm.apiKey === mask) next.llm.apiKey = current.llm.apiKey;
   if (next.video.apiKey === mask) next.video.apiKey = current.video.apiKey;
+  if (next.video.local.token === mask) next.video.local.token = current.video.local.token;
   if (next.image.apiKey === mask) next.image.apiKey = current.image.apiKey;
   return next;
 }

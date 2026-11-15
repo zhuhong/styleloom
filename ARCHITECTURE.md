@@ -27,7 +27,7 @@
            ├─ study_reference_video → learn/study.ts
            ├─ plan_shots / build_shot_prompt → generate/prompt.ts
            ├─ generate_still → providers/image.ts
-           └─ generate_shot → providers/video/icompify.ts
+           └─ generate_shot → providers/video/index.ts（icompify / 本地网关）
                 │
                 ├── progress ──▶ SSE progress
                 ├── 状态变化 ──▶ SSE state（右侧面板刷新）
@@ -178,7 +178,7 @@ Agent 在规划前 `search_skills`、命中后 `read_skill`，把 prompt fragmen
 | `set_shot_references` | 把项目内图片/视频绑定到分镜（Ref2VA/I2VA/FL2VA） | 无 |
 | `build_shot_prompt` | 生成并校验 H3 提示词 | 文本模型 |
 | `generate_still` | 定妆照/场景照（5090 本地 / 远程接口 / 回退参考帧） | 5090 免费；远程按张计费 |
-| `generate_shot` | H3 生成单镜（需确认） | **视频计费** |
+| `generate_shot` | H3 生成单镜（需确认） | icompify 按次计费；本地 5090 网关免费 |
 | `stitch_shots` | 统一转码后拼接分镜（硬切/叠化），输出成片 | 无（本地 ffmpeg） |
 | `list_assets` | 查看状态 | 无 |
 | `list_style_packs` | 查看风格包 | 无 |
@@ -188,9 +188,10 @@ Agent 在规划前 `search_skills`、命中后 `read_skill`，把 prompt fragmen
 ## 扩展点
 
 - **换文本/视觉模型**：只改 `settings.json`。任何 OpenAI 兼容网关都能用；工具调用需要网关支持 `tools`。
-- **换视频供应商**：实现 `generateVideoJob` 同签名函数，或在 `providers/video/` 增加分支。
-- **换图片供应商**：`providers/image.ts` 有四个分支——OpenAI `/images/generations`、OpenRouter `/images`、以及 5090 本地（SSH 调 `qwen_image_gen2.py`，scp 传参考图与产物），通过 `image.api` 切换；统一返回 `{ bytes, mimeType, model, backend }`。
-- **5090 出图链路**：`resolveImageBackend` 决定后端（`local` 直连；`auto` 先 `ssh true` 探活再回退远程）→ `withRemoteWorkdir` 建 `remote_outputs/videocopy-<tag>/` → `scpToRemote` 传最多 3 张条件图 → `sshRun` 执行脚本 → `fetchRemoteFile` 拉回 PNG → `finally` 删除远端目录。只支持「出一张图」，不做任务排队；需要并发/批量时改用 `../5090_H3/remote/diffsynthGateway.py`。
+- **换视频供应商**：`providers/video/index.ts` 按 `video.provider` 分流；新增后端实现同签名 `generateVideoJob` 并注册分支即可。
+- **换图片供应商**：`providers/image.ts` 有 OpenAI `/images/generations`、OpenRouter `/images`、5090 本地（`direct` 本机 spawn / `ssh` 远端调 `qwen_image_gen2.py`）三类，通过 `image.api` 与 `image.local.mode` 切换；统一返回 `{ bytes, mimeType, model, backend }`。
+- **5090 出图链路**：`localImageMode` 按 `image.local.mode` 选直连或 SSH；`resolveImageBackend` 决定本机/远端/回退。直连直接 `Bun.spawn` 脚本并读临时产物；SSH 则 `withRemoteWorkdir` 建远端目录 → `scpToRemote` 传条件图 → `sshRun` 执行脚本 → `fetchRemoteFile` 拉回 PNG → `finally` 删除远端目录。仍然「一张一进程」，不做任务排队；需要批量时在 5090 侧用 `--batch`。
+- **5090 视频链路**：`video.provider=local` 时 `providers/video/local.ts` 调 `diffsynth_run/diffsynthGateway.py`：`POST /v1/jobs` → 轮询 `GET /v1/jobs/{id}`（透传 progress/log）→ `GET /v1/jobs/{id}/file` 下载 mp4；取消时先 `DELETE` 再抛错。网关单 worker 串行，H3 与 Qwen 不能并发；本地 H3 只支持 t2va/i2va/ref2va（ref2va 单张参考图），不支持尾帧与参考视频。
 - **加镜头技能**（例如口型、音乐、转场）：新工具 + `agent/prompt.ts` 里的流程说明；重活放到 `src/generate/`。
 - **接工作流画布**：`styleBible`、`slice.json`、`plan[]` 都是稳定 JSON，可直接映射到节点/连线。
 - **换技能检索**：`store/skills.ts` 的 `searchSkills` 是唯一检索入口，可替换为 embedding/向量库而不影响工具层。

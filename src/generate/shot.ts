@@ -6,7 +6,7 @@ import { addAsset, projectDir, saveProject } from "../store/projects";
 import { ensureDir, removeDir, safeJoin, stamp } from "../util/fs";
 import { runFfmpeg } from "../util/ffmpeg";
 import { H3_SAFE_MIN_SECONDS, normalizeShotDuration, providerDurationFor } from "../util/duration";
-import { generateVideoJob } from "../providers/video/icompify";
+import { generateVideoJob } from "../providers/video";
 import { composeShotPrompt, prepareReferences, validatePrompt } from "./prompt";
 import { markSkillUsed } from "../store/skills";
 
@@ -37,6 +37,8 @@ export type GenerateShotResult = {
   trimmed: boolean;
   durationNote?: string;
   skillIds: string[];
+  /** 视频后端因能力边界产生的降级说明 */
+  providerNotes: string[];
 };
 
 function shotById(project: Project, shotId: string) {
@@ -62,7 +64,7 @@ export async function trimVideo(input: string, output: string, seconds: number, 
   ], { signal });
 }
 
-/** 单镜头生成：准备参考素材 → 编写 H3 提示词 → 提交 icompify → 落盘。 */
+/** 单镜头生成：准备参考素材 → 编写 H3 提示词 → 提交视频后端（icompify / 本地网关）→ 落盘。 */
 export async function generateShot(options: GenerateShotOptions): Promise<GenerateShotResult> {
   const { project, shotId, signal, onProgress } = options;
   const root = projectDir(project.id);
@@ -164,6 +166,7 @@ export async function generateShot(options: GenerateShotOptions): Promise<Genera
         providerDurationSeconds: providerDuration,
         trimmed: willTrim,
         durationExperimental: Boolean(options.experimentalDuration && requestedDuration < H3_SAFE_MIN_SECONDS),
+        providerNotes: result.notes ?? [],
       },
     });
     if (project.stage === "plan" || project.stage === "study") project.stage = "generate";
@@ -185,6 +188,7 @@ export async function generateShot(options: GenerateShotOptions): Promise<Genera
       trimmed: willTrim,
       durationNote,
       skillIds: shot.skillIds ?? [],
+      providerNotes: result.notes ?? [],
     };
   } catch (error) {
     shot.status = "failed";

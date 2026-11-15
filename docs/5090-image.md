@@ -1,12 +1,24 @@
 # 接入 5090 本地 Qwen-Image
 
-本项目的 `generate_still` 除了远程 OpenAI / OpenRouter 图片接口，也可以直接调用局域网 **RTX 5090** 上的 **Qwen-Image-2.1-Turbo**。这条路径复用了 `../5090_H3` 里已经验证过的 `remote/qwen_image_gen2.py`。
+本项目的 `generate_still` 除了远程 OpenAI / OpenRouter 图片接口，也可以直接调用 **RTX 5090** 上的 **Qwen-Image-2.1-Turbo**。运行在 5090 本机时走**直连**（直接 `Bun.spawn` 脚本）；从别的机器用时走 **SSH**。两条路径复用已在本机验证过的 `diffsynth_run/qwen_image_gen2.py`。
 
-## 为什么走 SSH，而不是再写一套推理服务
+## 连接方式
+
+`image.local.mode` 决定怎么连 5090：
+
+| 值 | 行为 |
+| --- | --- |
+| `auto`（默认） | 本机同时存在 `script` 与 `pythonBin` 就直连；否则只要 `host`、`script`、`pythonBin` 齐全就走 SSH |
+| `direct` | 只在本机 `Bun.spawn`，不经过 SSH/scp；缺少脚本或 Python 直接报错 |
+| `ssh` | 只走 SSH 远端，行为与旧版本一致 |
+
+直连和 SSH 用的是同一套脚本参数，设备内出图耗时不变；直连省掉 SSH 连接、scp 上传条件图、拉回 PNG 与远端临时目录，端到端墙钟更短。
+
+## 为什么不常驻一个推理服务
 
 - 5090 上的脚本已经支持批量、多张条件图、`--vram offload`，且实测 1344×768 / 8 步约 19–60 秒/张。
-- 图片任务是低频操作，不值得为它常驻一个 Web 服务；SSH + scp 足够，失败也能直接看到远端 stderr。
-- `../5090_H3/remote/diffsynthGateway.py` 的 HTTP 网关更适合视频长任务与外部多客户端排队；本项目当前只需要「出一张图」，所以先用最薄的 SSH 方案。以后要接网关，只需替换 `src/providers/image.ts` 的 local 分支。
+- 图片任务是低频操作，不值得为它常驻一个 Web 服务；直连或 SSH 足够，失败也能直接看到脚本 stderr。
+- `diffsynth_run/diffsynthGateway.py` 的 HTTP 网关更适合视频长任务与外部多客户端排队，视频侧已经接上（见 [5090-video.md](5090-video.md)）；图片仍保持「一张一进程」，需要批量时优先在 5090 侧用 `--batch`。
 
 ## 5090 侧准备
 
@@ -39,7 +51,8 @@ ssh -o BatchMode=yes 5090 true && echo ok
 | 字段 | 值 |
 | --- | --- |
 | `image.api` | `local`（只走 5090）或 `auto`（优先 5090，不可达回退远程） |
-| `image.local.host` | `5090`（或 `zhuh@192.168.0.121`） |
+| `image.local.mode` | `auto`（本机有脚本就直连，否则 SSH）/ `direct` / `ssh` |
+| `image.local.host` | `5090`（或 `zhuh@192.168.0.121`）；直连模式不需要 |
 | `image.local.pythonBin` | `/home/zhuh/miniconda3/envs/diffsynth/bin/python` |
 | `image.local.script` | `/home/zhuh/source_code/diffsynth_run/qwen_image_gen2.py` |
 | `image.local.workdir` | `/home/zhuh/source_code/diffsynth_run` |
@@ -50,14 +63,14 @@ ssh -o BatchMode=yes 5090 true && echo ok
 也可以用环境变量覆盖连接参数（不改 `data/settings.json`）：
 
 ```bash
-IMAGEGEN_LOCAL_HOST=5090 \
+IMAGEGEN_LOCAL_MODE=direct \
 IMAGEGEN_LOCAL_SCRIPT=/home/zhuh/source_code/diffsynth_run/qwen_image_gen2.py \
 bun start
 ```
 
 ## 自检
 
-只检查 SSH 与脚本，不加载模型、不占显存：
+`direct` 模式只查本机脚本与 Python 是否存在，`ssh` 模式只跑一条 `ssh true` 与 `test -f`；都不加载模型、不占显存：
 
 ```bash
 bun -e 'import { checkImageBackend } from "./src/providers/imageCheck"; console.log(await checkImageBackend())'
@@ -79,6 +92,8 @@ bun -e 'import { probeLocalImage } from "./src/providers/imageCheck"; console.lo
 | 1 张条件图 | 42.2s | 58.8s | 1.2MB PNG |
 
 端到端包含 SSH 建目录、scp 上传/下载与远端进程启动；GPU 显存回到约 655MiB 基线。
+
+2026-11-15 本机 `mode=direct` 复测：1344×768 / 8 步，冷启动设备内 159s、端到端 182s，产物 1.03MB PNG。直连不再有 SSH/scp 开销，但首次仍要付 pipeline 加载成本。
 
 ## 条件图
 

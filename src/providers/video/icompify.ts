@@ -2,34 +2,14 @@ import { readFile } from "node:fs/promises";
 import { loadSettings } from "../../config";
 import { MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "../../util/duration";
 import { mimeFromPath } from "../llm";
+import type { VideoJob, VideoResult } from "./types";
 
 const validRatios = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "auto"];
 const maxReferenceImages = 4;
 const maxReferenceVideos = 3;
 const maxReferenceBytes = 140 * 1024 * 1024;
 
-export type VideoJob = {
-  prompt: string;
-  durationSeconds: number;
-  aspectRatio?: string;
-  firstFrame?: string;
-  lastFrame?: string;
-  referenceImages?: string[];
-  referenceVideos?: string[];
-  model?: string;
-  signal?: AbortSignal;
-  onProgress?: (status: string, elapsedSeconds: number, percent?: number) => void;
-  onVideoId?: (videoId: string) => void;
-};
-
-export type VideoResult = {
-  videoId: string;
-  bytes: Uint8Array;
-  mimeType: string;
-  task: string;
-  model: string;
-  platform: Record<string, unknown>;
-};
+export type { VideoJob, VideoResult } from "./types";
 
 async function toDataUri(path: string) {
   const bytes = await readFile(path);

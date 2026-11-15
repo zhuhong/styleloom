@@ -21,7 +21,12 @@
     "aspectRatio": "16:9",
     "steps": 50,
     "pollIntervalMs": 10000,
-    "maxWaitMs": 3600000
+    "maxWaitMs": 3600000,
+    "local": {
+      "baseUrl": "http://127.0.0.1:8000",
+      "token": "",
+      "shortEdge": 480
+    }
   },
   "image": {
     "api": "auto",
@@ -30,6 +35,7 @@
     "model": "qwen/qwen-image-2.1-turbo",
     "size": "2K",
     "local": {
+      "mode": "auto",
       "host": "5090",
       "sshBin": "ssh",
       "scpBin": "scp",

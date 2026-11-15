@@ -26,17 +26,26 @@ ${project.plan.map(shot => `${shot.id} | ${shot.durationSeconds}s | ${shot.statu
 
 function capabilitySnapshot(settings: Settings) {
   const localImage = settings.image.local;
-  const useLocal = (settings.image.api === "local" || settings.image.api === "auto") && localImage.host && localImage.script;
+  const pathsReady = Boolean(localImage.script && localImage.pythonBin);
+  const sshReady = Boolean(localImage.host && localImage.script && localImage.pythonBin);
+  const localReady = localImage.mode === "direct" ? pathsReady : localImage.mode === "ssh" ? sshReady : pathsReady || sshReady;
+  const useLocal = localReady && (settings.image.api === "local" || settings.image.api === "auto");
   const remoteImage = settings.image.baseUrl && settings.image.model;
+  const localLabel = localImage.mode === "direct" ? "本机直连" : localImage.mode === "ssh" ? `SSH ${localImage.host}` : "auto 本机优先";
   const imageLine = useLocal
-    ? `5090 本地 Qwen（${localImage.host}，${settings.image.api === "auto" ? "auto 优先，失败回退远程" : "仅本地"}）${remoteImage ? `；远程备用：${settings.image.model}` : ""}`
+    ? `5090 本地 Qwen（${localLabel}，${settings.image.api === "auto" ? "失败回退远程" : "仅本地"}）${remoteImage ? `；远程备用：${settings.image.model}` : ""}`
     : remoteImage
       ? `已配置（${settings.image.model}）`
       : "未配置（定妆照会回退为参考帧）";
+  const videoLine = settings.video.provider === "local"
+    ? `本地 5090 网关（${settings.video.local.baseUrl}；不支持尾帧/参考视频，ref2va 只用单张参考图）`
+    : settings.video.apiKey
+      ? `icompify 已配置（${settings.video.model} / ${settings.video.referenceModel}）`
+      : "未配置 icompify API Key";
   return [
     `文本模型：${settings.llm.model || "未配置"}`,
     `视觉模型：${settings.llm.visionModel || "未配置"}`,
-    `H3 视频：${settings.video.apiKey ? `已配置（${settings.video.model} / ${settings.video.referenceModel}）` : "未配置 icompify API Key"}`,
+    `H3 视频：${videoLine}`,
     `图片模型：${imageLine}`,
   ].join("\n");
 }

@@ -82,10 +82,12 @@ bun start
 | --- | --- |
 | `llm.baseUrl` / `apiKey` / `model` | 任意 OpenAI 兼容文本接口（默认本机 LiteLLM `http://localhost:4000/v1`） |
 | `llm.visionModel` | 支持图片输入的模型（默认 `deepseek-v4.1-flash`），Gemini 等也可 |
+| `video.provider` | `icompify`（默认，远程计费）或 `local`（RTX 5090 网关，地址见 `video.local.baseUrl`） |
 | `video.baseUrl` / `apiKey` | icompify 开放平台，默认 `https://api.icompify.com` |
 | `video.model` / `referenceModel` | `minimax-h3-fl2va`（文生 / 首尾帧）、`minimax-h3-ref2va`（参考图 / 参考视频） |
-| `image.*` | 定妆照后端。`image.api=local` 走局域网 **RTX 5090**（Qwen-Image-2.1-Turbo，SSH 调用，免费）；`openrouter` / `openai` 走远程图片接口；`auto` 优先 5090、不可达再回退。留空则回退参考帧。见 [docs/5090-image.md](docs/5090-image.md) |
-| `image.local.*` | `host`、`pythonBin`、`script`、`workdir`、`shortEdge`（768）、`steps`（8）、`vram`（`offload`） |
+| `video.local.*` | 网关 `baseUrl`（`http://127.0.0.1:8000`）、`token`、`shortEdge`（480）。见 [docs/5090-video.md](docs/5090-video.md) |
+| `image.*` | 定妆照后端。`image.api=local` 走 **RTX 5090**（Qwen-Image-2.1-Turbo，免费）：`mode=auto/direct` 在本机直接 spawn，`mode=ssh` 走远端；`openrouter` / `openai` 走远程图片接口；`auto` 优先可用 5090、否则回退。留空则回退参考帧。见 [docs/5090-image.md](docs/5090-image.md) |
+| `image.local.*` | `mode`（`auto` / `direct` / `ssh`）、`host`、`pythonBin`、`script`、`workdir`、`shortEdge`（768）、`steps`（8）、`vram`（`offload`） |
 | `xhs.*` | `ytDlpPath`、`cookiesFromBrowser`（chrome / safari / firefox / edge / 留空）、referer、UA、超时 |
 | `ffmpeg.*` | 二进制路径，默认 `ffmpeg` / `ffprobe` |
 | `learning.*` | 切镜阈值、最短镜头、最多镜头数、每镜采样帧数、是否保留片段 |
@@ -171,12 +173,12 @@ src/
 ├── agent/                对话循环、系统提示词、23 个工具
 ├── learn/                切片 → 标注 → 归纳 → 抽技能 → 编排
 ├── generate/             参考决策、H3 提示词、单镜生成、定妆照
-├── providers/            llm / image（含 5090 SSH 后端）/ download(xhs) / video(icompify)，只做协议转换
+├── providers/            llm / image（含 5090 直连/SSH）/ download(xhs) / video(icompify + 本地网关)，只做协议转换
 ├── store/                项目、manifest、会话、风格包、技能
 └── util/                 文件、ffmpeg、ssh 与时长原语
 web/                      无构建步骤的原生前端
 skills/                   公开只读技能库（仅知识，不含证据图）
-docs/                     技能、小红书下载、5090 出图、H3 提示词、示例
+docs/                     技能、小红书下载、5090 出图/视频、H3 提示词、示例
 ```
 
 磁盘上的数据（`data/`，已被 git 忽略）：
@@ -208,7 +210,8 @@ data/
 - 前端素材灯箱：关键帧、定妆照、技能证据与成片在页内弹窗查看（图片 / 视频 / 音频），支持遮罩与 ESC 关闭，不再跳新页面。
 - 对话 Markdown：助手消息在页内渲染标题、列表、表格、围栏代码块与安全链接；原始 HTML 会被转义，危险 URL 会被拒绝。
 - 聊天上传：图片/视频可附加或拖入输入框，保存到 `assets/uploads/`，随会话历史保留；用 `set_shot_references` 绑定到分镜（图片走 Ref2VA，首/尾帧走 I2VA/FL2VA）。
-- 5090 本地出图后端：`generate_still` 通过 SSH 调 `qwen_image_gen2.py`，先用 scp 上传最多 3 张参考帧，再把 PNG 拉回，并在素材上记录 `backend/model/references`。真实 5090 出图已跑通：纯文生 1344×768，远端 38.8 秒 / 墙钟 70.8 秒（1.4MB）；带 1 张条件图墙钟 58.8 秒（1.2MB）。SSH 路径、参数转义与远端临时目录清理另有假 `ssh`/`scp` 覆盖。
+- 5090 本地出图后端：在 5090 本机用 `image.local.mode=auto/direct` 直接 spawn `qwen_image_gen2.py`，从别的机器用 SSH + scp 传参考帧，并在素材上记录 `backend/model/references`。真实出图已跑通：纯文生 1344×768，SSH 模式设备内 38.8 秒 / 墙钟 70.8 秒；直连模式冷启动设备内 159 秒 / 墙钟 182 秒（1.03MB）。SSH 路径、参数转义与远端临时目录清理另有假 `ssh`/`scp` 覆盖。
+- 5090 本地 H3 视频后端：`video.provider=local` 走 `diffsynthGateway.py`；真实 T2VA（4 秒、832×480、20 步）含冷启动 361 秒，产出 6.67MB、24fps、带音轨的 mp4（17k+5 对齐后 107 帧）。尾帧与参考视频会被拒绝；Ref2VA 只用第 1 张参考图。
 - 一次真实计费 H3 T2VA 出片：9 秒、9:16、768×1344、含音轨，排队+推理约 141 秒；VLM 三帧质检判定"高度符合"，仅有轻微机位漂移与手指/画框轻微融合。
 - 一次真实计费 H3 Ref2VA 出片：人物定妆照 + 空场景照两张参考图，9 秒、9:16、768×1344、含音轨，约 248 秒；VLM 质检判定身份/房间/构图"高度符合"，无裁切/漂移，仅手部与墙面开关面板有轻微偏差。
 - 第二条参考片（120 秒小红书攀岩视频，16 镜）：抽取 8 条技能；9 秒 Ref2VA 攀岩镜头约 248 秒出片，VLM 判定动作、身份、馆内布局"高度符合"；5 条运镜/灯光/色彩技能升为 active（0.80）。
@@ -225,7 +228,8 @@ data/
 - 已支持基础整片拼接（硬切 / 叠化），但字幕、复杂转场、混音与多轨编辑未实现。
 - H3 的 2/3 秒短档位属于实验能力；安全默认是 4 秒生成后本地裁剪。
 - 远程图片接口只支持文生图；参考图条件只有 5090 后端支持（通过 `--ref` 传最多 3 张）。
-- 5090 每张定妆照都是独立进程，约 31GB 的 pipeline 每次都要重新加载；实测端到端约 59–71 秒（含 SSH/传输），设备内约 39–42 秒。批量出图请直接在 5090 侧用 `--batch` 或 `diffsynthGateway.py`。
+- 5090 每张定妆照都是独立进程，约 31GB 的 pipeline 每次都要重新加载；实测 SSH 端到端约 59–71 秒（含传输），设备内约 39–42 秒。`mode=direct` 省掉传输，但仍要付每次加载成本；批量出图请直接在 5090 侧用 `--batch`。
+- 本地 H3 视频走单 worker 网关：H3 与 Qwen 不能同时占用 32GB 显存；本地 H3 不支持尾帧与参考视频，Ref2VA 只用一张参考图。
 - 套用风格包只复制被引用的图片与片段，不复制原项目分镜。
 - 对话 Markdown 是轻量实现：不支持数学公式、脚注与原始 HTML；原始 HTML 会按文本显示。
 - 聊天上传单次最多 6 个文件，图片 ≤20MB、视频 ≤140MB；不支持 SVG。
@@ -246,7 +250,8 @@ data/
 - [技能库](docs/skills.md) —— 生命周期、匹配、置信度
 - [小红书下载](docs/xhs-download.md) —— 登录态与失败分支
 - [H3 提示词](docs/h3-prompting.md) —— 官方提示词结构
-- [5090 本地出图](docs/5090-image.md) —— SSH 配置、设置项与自检
+- [5090 本地出图](docs/5090-image.md) —— 直连 / SSH 配置、设置项与自检
+- [5090 本地 H3 视频](docs/5090-video.md) —— 网关启动、模式映射与能力边界
 - [架构说明](ARCHITECTURE.md) —— 请求生命周期与设计取舍
 - 示例：[风格圣经](docs/examples/style-bible-example.md) · [Ref2VA 提示词](docs/examples/ref2va-prompt-example.txt) · [技能](docs/examples/skill-example.md) · [真实出片](docs/examples/generated-shot-example.md) · [Ref2VA 定妆照版](docs/examples/ref2va-with-stills-example.md) · [攀岩同款](docs/examples/xhs-climbing-example.md)
 

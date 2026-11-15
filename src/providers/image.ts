@@ -1,6 +1,8 @@
 import { rm } from "node:fs/promises";
-import { loadSettings, type Settings } from "../config";
-import { exists } from "../util/fs";
+import { join } from "node:path";
+import { dataDir, loadSettings, type Settings } from "../config";
+import { ensureDir, exists } from "../util/fs";
+import { runProcess } from "../util/ffmpeg";
 import { fetchRemoteFile, scpToRemote, shellQuote, sshReachable, sshRun, withRemoteWorkdir } from "../util/ssh";
 
 export type ImageBackend = "openrouter" | "openai" | "local";
@@ -52,17 +54,56 @@ function resolveLocalSize(shortEdge: number, ratio: string) {
   return { width: snap(width * scale), height: snap(height * scale) };
 }
 
-function pickApi(settings: Settings): ImageBackend {
-  const baseUrl = settings.image.baseUrl.trim();
-  if (settings.image.api === "local" || settings.image.api === "openrouter" || settings.image.api === "openai") {
-    return settings.image.api;
-  }
-  // auto：配了 5090 就优先本地（免费），否则按 baseUrl 猜远程形态。
-  if (localImageConfigured(settings)) return "local";
-  return /openrouter\.ai/i.test(baseUrl) ? "openrouter" : "openai";
+async function pythonReady(pythonBin: string) {
+  const value = pythonBin.trim();
+  if (!value) return false;
+  return value.includes("/") ? exists(value) : Boolean(Bun.which(value));
 }
 
-/** local 后端是否配置齐全（host + script）。 */
+async function scriptReady(script: string) {
+  const value = script.trim();
+  return Boolean(value) && exists(value);
+}
+
+/**
+ * 决定 5090 图片后端用哪种连法。
+ * auto：本机同时有脚本与 Python 就直连，否则配了 host 就走 SSH。
+ * direct / ssh：显式指定，缺配置时返回 undefined 交给调用方报具体错误。
+ */
+export async function localImageMode(settings: Settings): Promise<"direct" | "ssh" | undefined> {
+  const local = settings.image.local;
+  const sshReady = Boolean(local.host.trim() && local.script.trim() && local.pythonBin.trim());
+  if (local.mode === "ssh") return sshReady ? "ssh" : undefined;
+  if (local.mode === "direct") return local.script.trim() && local.pythonBin.trim() ? "direct" : undefined;
+  if ((await scriptReady(local.script)) && (await pythonReady(local.pythonBin))) return "direct";
+  return sshReady ? "ssh" : undefined;
+}
+
+/** 本机脚本 / Python 是否就绪，给自检复用。 */
+export async function localImageFiles(settings: Settings) {
+  return {
+    script: await scriptReady(settings.image.local.script),
+    python: await pythonReady(settings.image.local.pythonBin),
+  };
+}
+
+/**
+ * 环境变量只覆盖「连哪台机器 / 用哪种连法」，用于测试脚本；正常情况下走 data/settings.json。
+ * 会直接修改传入的 settings（调用方拿到的是 loadSettings 的缓存对象）。
+ */
+export function applyLocalImageEnv(settings: Settings) {
+  const local = settings.image.local;
+  local.host = process.env.IMAGEGEN_LOCAL_HOST?.trim() || local.host;
+  local.sshBin = process.env.IMAGEGEN_SSH_BIN?.trim() || local.sshBin;
+  local.scpBin = process.env.IMAGEGEN_SCP_BIN?.trim() || local.scpBin;
+  local.script = process.env.IMAGEGEN_LOCAL_SCRIPT?.trim() || local.script;
+  local.pythonBin = process.env.IMAGEGEN_LOCAL_PYTHON?.trim() || local.pythonBin;
+  local.workdir = process.env.IMAGEGEN_LOCAL_WORKDIR?.trim() || local.workdir;
+  const mode = process.env.IMAGEGEN_LOCAL_MODE?.trim();
+  if (mode === "auto" || mode === "direct" || mode === "ssh") local.mode = mode;
+}
+
+/** local 后端 SSH 模式是否配置齐全（host + script + pythonBin）。 */
 export function localImageConfigured(settings: Settings) {
   const local = settings.image.local;
   return Boolean(local.host.trim() && local.script.trim() && local.pythonBin.trim());
@@ -77,23 +118,31 @@ export async function localImageReachable(settings: Settings, signal?: AbortSign
 
 /**
  * 决定本次走哪个后端。
- * auto = 配了 5090 且 SSH 可达就用 5090，否则回退到 API 图片模型。
+ * auto = 本机能直连就直连，否则 SSH 可达就用 5090，都不可达回退远程图片模型。
  * local = 只用 5090（失败直接报错，方便暴露问题）。
  */
 export async function resolveImageBackend(
   options: { signal?: AbortSignal; onProgress?: ImageProgress } = {},
 ): Promise<ImageBackend | undefined> {
   const settings = await loadSettings();
-  const configured = pickApi(settings);
+  const api = settings.image.api;
   const hasApi = Boolean(settings.image.baseUrl.trim() && settings.image.model.trim());
-  if (configured !== "local") return hasApi ? configured : undefined;
-  // 走到这里说明要用 5090：显式指定就直连（失败直接报错），auto 才做可达性探测。
-  if (settings.image.api === "local") return "local";
-  options.onProgress?.(3, "探测 5090 是否可达");
-  if (await localImageReachable(settings, options.signal)) return "local";
-  if (!hasApi) return "local"; // 没配 API 时仍然尝试 5090，让报错更具体
-  options.onProgress?.(5, "5090 不可达，回退远程图片模型");
-  return /openrouter\.ai/i.test(settings.image.baseUrl) ? "openrouter" : "openai";
+  const remote: ImageBackend = /openrouter\.ai/i.test(settings.image.baseUrl) ? "openrouter" : "openai";
+  if (api === "local") return "local";
+  if (api === "openai" || api === "openrouter") return hasApi ? api : undefined;
+
+  const mode = await localImageMode(settings);
+  if (mode === "direct") return "local";
+  if (mode === "ssh") {
+    options.onProgress?.(3, "探测 5090 是否可达");
+    if (await localImageReachable(settings, options.signal)) return "local";
+    if (hasApi) {
+      options.onProgress?.(5, "5090 不可达，回退远程图片模型");
+      return remote;
+    }
+    return "local"; // 没配 API 时仍然尝试 5090，让报错更具体
+  }
+  return hasApi ? remote : undefined;
 }
 
 async function generateViaApi(options: GenerateImageOptions, settings: Settings, api: "openai" | "openrouter"): Promise<ImageResult> {
@@ -131,12 +180,86 @@ async function generateViaApi(options: GenerateImageOptions, settings: Settings,
   throw new Error("图片模型未返回图片数据");
 }
 
+/** qwen_image_gen2.py 的进度行里会混着 tqdm 输出，只挑 {"results":[...]} 那一行。 */
+function parseLocalOutput(stdout: string) {
+  let seconds: number | undefined;
+  let size: { width?: number; height?: number } = {};
+  for (const line of stdout.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{") || !trimmed.includes("\"results\"")) continue;
+    try {
+      const parsed = JSON.parse(trimmed) as { results?: { seconds?: number; width?: number; height?: number }[] };
+      const first = parsed.results?.[0];
+      if (first) {
+        seconds = first.seconds;
+        size = { width: first.width, height: first.height };
+      }
+    } catch {
+      // 进度行里也可能出现 {，忽略解析失败
+    }
+  }
+  return { seconds, ...size };
+}
+
+function localArgs(options: GenerateImageOptions, settings: Settings, outPath: string, width: number, height: number, references: string[]) {
+  const local = settings.image.local;
+  return [
+    local.pythonBin,
+    local.script,
+    "-p", options.prompt,
+    "-o", outPath,
+    "--width", String(width),
+    "--height", String(height),
+    "--steps", String(local.steps),
+    "--vram", local.vram,
+    ...references.flatMap(ref => ["--ref", ref]),
+  ];
+}
+
 /**
- * 5090 本地 Qwen-Image-2.1-Turbo 出图。
- * 走 SSH + scp：条件图上传 → 远端跑 qwen_image_gen2.py → 拉回 PNG。
- * 支持多张条件图（走 text-encoder 的 vision 通道，不做 img2img 加噪）。
+ * 本机直连：直接 Bun.spawn qwen_image_gen2.py，跳过 SSH/scp。
+ * 只有运行在 5090 本机时才有意义；省掉上传/下载与远端进程启动，设备内耗时不变。
  */
-async function generateViaLocal(options: GenerateImageOptions, settings: Settings): Promise<ImageResult> {
+async function generateViaDirect(options: GenerateImageOptions, settings: Settings): Promise<ImageResult> {
+  const local = settings.image.local;
+  const { width, height } = resolveLocalSize(local.shortEdge, options.ratio ?? "16:9");
+  const references = (options.references ?? []).filter(Boolean);
+  for (const reference of references) {
+    if (!(await exists(reference))) throw new Error(`条件图不存在：${reference}`);
+  }
+
+  const tag = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const dir = join(dataDir, "cache", "image", tag);
+  const outPath = join(dir, "out.png");
+  await ensureDir(dir);
+  const timeout = AbortSignal.timeout(local.timeoutMs);
+  const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
+  try {
+    options.onProgress?.(8, references.length ? `本机 5090 准备 ${references.length} 张条件图` : "启动本机 5090 出图");
+    options.onProgress?.(25, `5090 出图中（${width}x${height} / ${local.steps} 步）`);
+    const result = await runProcess(localArgs(options, settings, outPath, width, height, references), {
+      cwd: local.workdir.trim() || undefined,
+      signal,
+    });
+    if (options.signal?.aborted) throw options.signal.reason ?? new Error("已取消");
+    if (timeout.aborted) throw new Error(`5090 出图超时（${Math.round(local.timeoutMs / 1000)}s）`);
+    if (result.code !== 0) {
+      const detail = (result.stderr.trim() || result.stdout.trim()).split("\n").slice(-6).join("\n");
+      throw new Error(`qwen_image_gen2.py 执行失败（退出码 ${result.code}）：${detail || "无错误输出"}`);
+    }
+    options.onProgress?.(88, "读取图片");
+    const bytes = new Uint8Array(await Bun.file(outPath).arrayBuffer());
+    return { bytes, mimeType: "image/png", model: "qwen-image-2.1-turbo@local", backend: "local", ...parseLocalOutput(result.stdout) };
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+/**
+ * 5090 SSH 出图（从别的机器连 5090 时用）。
+ * 条件图上传 → 远端跑 qwen_image_gen2.py → 拉回 PNG；支持多张条件图（vision 通道，不做 img2img 加噪）。
+ */
+async function generateViaSsh(options: GenerateImageOptions, settings: Settings): Promise<ImageResult> {
   const local = settings.image.local;
   const host = local.host.trim();
   const sshBin = local.sshBin.trim() || "ssh";
@@ -175,23 +298,6 @@ async function generateViaLocal(options: GenerateImageOptions, settings: Setting
     options.onProgress?.(25, `5090 出图中（${width}x${height} / ${local.steps} 步）`);
     const stdout = await sshRun(sshBin, host, command, { signal, timeoutMs });
 
-    let seconds: number | undefined;
-    let outSize: { width?: number; height?: number } = {};
-    for (const line of stdout.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith("{") || !trimmed.includes("\"results\"")) continue;
-      try {
-        const parsed = JSON.parse(trimmed) as { results?: { seconds?: number; width?: number; height?: number }[] };
-        const first = parsed.results?.[0];
-        if (first) {
-          seconds = first.seconds;
-          outSize = { width: first.width, height: first.height };
-        }
-      } catch {
-        // 进度行里也可能出现 {，忽略解析失败
-      }
-    }
-
     options.onProgress?.(88, "拉回图片");
     const fetched = await fetchRemoteFile({ scpBin, host, remotePath: remoteOut, fileName: "out.png", signal, timeoutMs });
     try {
@@ -201,9 +307,7 @@ async function generateViaLocal(options: GenerateImageOptions, settings: Setting
         mimeType: "image/png",
         model: `qwen-image-2.1-turbo@${host}`,
         backend: "local" as const,
-        seconds,
-        width: outSize.width,
-        height: outSize.height,
+        ...parseLocalOutput(stdout),
       };
     } finally {
       await rm(fetched.dir, { recursive: true, force: true }).catch(() => undefined);
@@ -211,17 +315,33 @@ async function generateViaLocal(options: GenerateImageOptions, settings: Setting
   });
 }
 
-/** 5090 连通性自检：只跑一条 ssh true，不加载模型、不产生显存占用。 */
+async function generateViaLocal(options: GenerateImageOptions, settings: Settings): Promise<ImageResult> {
+  const mode = await localImageMode(settings);
+  if (mode === "direct") return generateViaDirect(options, settings);
+  if (mode === "ssh") return generateViaSsh(options, settings);
+  throw new Error("5090 图片后端未配置完整：direct 模式需要本机 script 与 pythonBin，ssh 模式需要 host、script 与 pythonBin");
+}
+
+/** 5090 连通性自检：direct 只查本机文件，ssh 只跑一条 ssh true；都不加载模型、不占显存。 */
 export async function checkLocalImage(settings: Settings, signal?: AbortSignal) {
   const local = settings.image.local;
-  if (!localImageConfigured(settings)) return { ok: false, message: "未配置 5090 地址或脚本路径" };
-  const reachable = await localImageReachable(settings, signal);
-  if (!reachable) return { ok: false, message: `无法免密登录 ${local.host}（检查网络、SSH 配置与密钥）` };
-  const scriptExists = await sshRun(local.sshBin || "ssh", local.host.trim(), `test -f ${shellQuote(local.script)} && echo yes || echo no`, { signal, timeoutMs: 20_000 })
-    .then(output => output.trim() === "yes")
-    .catch(() => false);
-  if (!scriptExists) return { ok: false, message: `${local.host} 上找不到出图脚本：${local.script}` };
-  return { ok: true, message: `${local.host} 可达，脚本就绪（${local.script}）` };
+  const mode = await localImageMode(settings);
+  if (mode === "direct") {
+    const files = await localImageFiles(settings);
+    if (files.script && files.python) return { ok: true, message: `本机直连就绪（${local.script}）` };
+    const missing = [!files.script ? "脚本" : "", !files.python ? "Python" : ""].filter(Boolean).join("与");
+    return { ok: false, message: `本机直连缺少${missing}：${local.script} / ${local.pythonBin}` };
+  }
+  if (mode === "ssh") {
+    const reachable = await localImageReachable(settings, signal);
+    if (!reachable) return { ok: false, message: `无法免密登录 ${local.host}（检查网络、SSH 配置与密钥）` };
+    const scriptExists = await sshRun(local.sshBin || "ssh", local.host.trim(), `test -f ${shellQuote(local.script)} && echo yes || echo no`, { signal, timeoutMs: 20_000 })
+      .then(output => output.trim() === "yes")
+      .catch(() => false);
+    if (!scriptExists) return { ok: false, message: `${local.host} 上找不到出图脚本：${local.script}` };
+    return { ok: true, message: `${local.host} 可达，脚本就绪（${local.script}）` };
+  }
+  return { ok: false, message: "未配置 5090：可填本机 script/pythonBin（direct）或 host（ssh）" };
 }
 
 /**
@@ -230,20 +350,10 @@ export async function checkLocalImage(settings: Settings, signal?: AbortSignal) 
  */
 export async function generateImageWithModel(options: GenerateImageOptions): Promise<ImageResult | null> {
   const settings = await loadSettings();
-  // 环境变量只影响「连哪台机器」，用于测试脚本；正常情况下走 data/settings.json。
-  const local = settings.image.local;
-  local.host = process.env.IMAGEGEN_LOCAL_HOST?.trim() || local.host;
-  local.sshBin = process.env.IMAGEGEN_SSH_BIN?.trim() || local.sshBin;
-  local.scpBin = process.env.IMAGEGEN_SCP_BIN?.trim() || local.scpBin;
-  local.script = process.env.IMAGEGEN_LOCAL_SCRIPT?.trim() || local.script;
-  local.pythonBin = process.env.IMAGEGEN_LOCAL_PYTHON?.trim() || local.pythonBin;
-  local.workdir = process.env.IMAGEGEN_LOCAL_WORKDIR?.trim() || local.workdir;
+  applyLocalImageEnv(settings);
   const backend = await resolveImageBackend({ signal: options.signal, onProgress: options.onProgress });
   if (!backend) return null;
   if (backend === "local") {
-    if (!localImageConfigured(settings)) {
-      throw new Error("5090 图片后端未配置完整：请在设置里填写 image.local.host、script 和 pythonBin");
-    }
     const result = await generateViaLocal(options, settings);
     options.onProgress?.(100, "图片已生成");
     return result;
