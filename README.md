@@ -9,25 +9,21 @@
 ![Runtime deps: 0](https://img.shields.io/badge/runtime%20deps-0-brightgreen)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-orange)
 
-Most video generators start from a prompt and hope. StyleLoom starts from a reference video you already trust: it cuts the footage into shots, has a vision model annotate every shot frame by frame, distills that into a structured **style bible** (identity, wardrobe, art direction, camera grammar, rhythm, lighting, sound), and then drives MiniMax H3 to generate new shots from those constraints.
+Most video generators start from a prompt and hope. StyleLoom starts from a reference video you already trust: it cuts the footage into shots, has a vision model annotate every shot, distills that into a structured **style bible** (identity, wardrobe, art direction, camera grammar, rhythm, lighting, sound), and then drives MiniMax H3 to generate new shots from those constraints.
 
-Every study session also produces **portable skills** — "how to move the camera", "how to light a rainy street" — stored with evidence and scored only by independent evidence and real human feedback. Over time the agent accumulates craft, not just prompts.
-
-Skills can also be **published as a read-only public library**. The repo ships a `skills/` directory of shareable knowledge — no evidence images, no feedback, no confidence — and `export_skills` turns a trusted local skill into a shareable entry. At runtime `search_skills` / `read_skill` read both your local `data/skills/` and the public `skills/`, with the local copy winning on an id collision.
+Each study also produces **portable skills** — "how to move the camera", "how to light a rainy street" — stored with evidence, and scored only by independent evidence and real human feedback. The model never grades its own homework. Skills can be exported to a read-only public library in `skills/`.
 
 ```
 reference video ──ffmpeg──▶ shots / keyframes / reference clips
                               │
                               ▼
                    per-shot vision annotation
-                   (framing, angle, movement, lighting, subject, action, sound)
                               │
                               ▼
                    LLM distills a "style bible" + reusable style pack
                               │
                               ▼
-                   extracts cross-project skills
-                   (evidence, feedback, confidence accumulate)
+                   extracts cross-project skills (evidence, feedback, confidence)
                               │
         ┌─────────────────────┼─────────────────────┐
         ▼                     ▼                     ▼
@@ -50,18 +46,11 @@ One 9.4-second vertical reference clip, studied once, then rendered twice. The t
 [Open the full clip (MP4, 9.4 s, with audio)](docs/assets/example-generated.mp4) — 768×1344, one fixed camera, no cuts.
 
 Full write-up: [reference stills + Ref2VA example](docs/examples/ref2va-with-stills-example.md).
-
-Second run: a 120-second Xiaohongshu climbing video → 16-shot study → 9-second Ref2VA climbing shot. Write-up: [climbing example](docs/examples/xhs-climbing-example.md).
-
-## Why another video agent
-
-- **Structured beats similar.** A shot needs executable constraints — identity anchors, wardrobe, set layout, camera move amplitude and speed, light direction. Those go straight into an H3 prompt and stay readable by humans, so you can correct them.
-- **Skills need evidence, not vibes.** A skill's confidence comes only from independent project evidence and real feedback. The model never grades its own homework.
-- **Money boundaries are explicit.** Building a prompt is free. Rendering requires an explicit `confirmed=true` after you have seen the plan.
+Second run: a 120-second Xiaohongshu climbing video → 16-shot study → 9-second Ref2VA climbing shot ([write-up](docs/examples/xhs-climbing-example.md)).
 
 ## Quick start
 
-Requirements: macOS or Linux (Windows untested), [Bun](https://bun.sh) 1.3+, local `ffmpeg` and `ffprobe`. Xiaohongshu download additionally needs `yt-dlp` (`brew install yt-dlp`).
+Requirements: macOS or Linux (Windows untested), [Bun](https://bun.sh) 1.3+, `ffmpeg` / `ffprobe`. Xiaohongshu download additionally needs `yt-dlp`.
 
 ```bash
 git clone https://github.com/zhuhong/styleloom.git
@@ -69,176 +58,90 @@ cd styleloom
 bun install
 mkdir -p data && cp settings.example.json data/settings.json
 # edit data/settings.json — at minimum an LLM endpoint and an icompify key
-bun start
-# open http://127.0.0.1:8787
+bun start            # http://127.0.0.1:8787
 ```
 
-Prefer the terminal? `bun run chat`.
+`bun run chat` opens the terminal client. `bun run typecheck` is the sanity check.
 
-Sanity check: `bun run typecheck`.
-
-Running it for real — persistent service, LAN access, reverse proxy, backup, troubleshooting — see the [deployment guide](docs/deploy.md). Optional self-hosted GPU backends (free but exclusive VRAM) are in [docs/local-gpu.md](docs/local-gpu.md).
-
-### Configuration
-
-Everything lives in `data/settings.json` (or the in-app **Settings** dialog). `data/` is git-ignored; keys are masked on read and preserved as `********` when the UI saves.
+Then fill in `data/settings.json` (or use the in-app **Settings** dialog):
 
 | Field | Purpose |
 | --- | --- |
-| `llm.baseUrl` / `apiKey` / `model` | Any OpenAI-compatible text endpoint (default: local LiteLLM at `http://localhost:4000/v1`) |
-| `llm.visionModel` | Model that accepts images (default `deepseek-v4.1-flash`); Gemini etc. work too |
-| `video.provider` | `icompify` (default, billed remote) or `local` (self-hosted GPU gateway at `video.local.baseUrl`) |
-| `video.baseUrl` / `apiKey` | icompify open platform, default `https://api.icompify.com` |
-| `video.model` / `referenceModel` | `minimax-h3-fl2va` (text / first-last frame), `minimax-h3-ref2va` (reference image / video) |
-| `video.local.*` | Gateway `baseUrl` (`http://127.0.0.1:8000`), `token`, `shortEdge` (480). See [docs/local-gpu.md](docs/local-gpu.md) |
-| `image.*` | Stills backend. `image.api=local` renders on your own GPU (free): `mode=auto/direct` spawns the script on this host, `mode=ssh` calls it remotely; `openrouter` / `openai` use a remote image API; `auto` prefers a usable local backend and falls back. Empty → reference keyframes. See [docs/local-gpu.md](docs/local-gpu.md) |
-| `image.local.*` | `mode` (`auto` / `direct` / `ssh`), `host`, `pythonBin`, `script`, `workdir`, `shortEdge` (768), `steps` (8), `vram` (`offload`). Empty by default — fill in your own paths |
-| `xhs.*` | `ytDlpPath`, `cookiesFromBrowser` (chrome / safari / firefox / edge / empty), referer, UA, timeout |
-| `ffmpeg.*` | Binary paths, default `ffmpeg` / `ffprobe` |
-| `learning.*` | Scene threshold, minimum shot length, max shots, samples per shot, keep clips |
+| `llm.baseUrl` / `apiKey` / `model` | Any OpenAI-compatible text endpoint that supports tool calling |
+| `llm.visionModel` | Model that accepts images; used for per-shot annotation |
+| `video.provider` / `video.apiKey` | `icompify` (default, billed) or `local` (self-hosted GPU gateway) |
+| `image.*` | Stills backend: `local` GPU, remote `openrouter` / `openai`, or empty to fall back to reference keyframes |
+| `xhs.*` / `ffmpeg.*` / `learning.*` | Downloader, binary paths, slicing parameters |
+
+Everything else — data layout, persistent service, LAN access, reverse proxy, backup, troubleshooting, self-hosted GPU setup — is in the **[deployment guide](docs/deploy.md)** and **[local GPU backend](docs/local-gpu.md)**.
 
 ## Using it
 
-1. **Give it material** — a local video path, a Xiaohongshu note link (full URL with `xsec_token` recommended), or just an idea.
-   e.g. *"Study the camera work and lighting of `/path/reference.mp4`, then make an 8-second rainy street dialogue shot."*
-2. **The agent studies** — Xiaohongshu links are downloaded first (`download_xhs_video`), then `study_reference_video` slices, annotates, distills and extracts skills, streaming progress to the page.
-3. **Review the study** — the agent reports characters, locations, camera grammar and rhythm in plain language; ask for corrections and it will call `update_style_bible`.
-4. **Generate stills** — `generate_still` for character/location references (falls back to reference keyframes if no image model is configured, and says so).
-5. **Plan shots** — `plan_shots`, 1–15 second integers per shot (H3's safe minimum is 4s; shorter shots are trimmed or sent experimentally); set `referenceShotIds` when a shot should inherit a reference camera move.
-6. **Preview the prompt** — `build_shot_prompt`, free. The mode (T2VA / I2VA / FL2VA / L2VA / Ref2VA) is chosen automatically from available material.
-7. **Render** — `generate_shot(confirmed=true)` only after you have seen and approved the plan.
-8. **Give feedback** — say "that shot is good / meh / bad"; the agent calls `record_skill_outcome` to update skill confidence.
-9. **Compound** — a second reference video hitting the same skill merges evidence; 3 independent projects or 1 positive review promotes a skill to `active`.
+1. **Give it material** — a local video path, a Xiaohongshu note link, or just an idea.
+2. **It studies** — slice → per-shot annotation → style bible → skill extraction, with progress streamed to the page. Review the result and ask for corrections.
+3. **Stills** — `generate_still` for character / location references.
+4. **Plan and preview** — `plan_shots`, then `build_shot_prompt`. Both free.
+5. **Render** — `generate_shot(confirmed=true)` only after you have seen and approved the plan.
+6. **Give feedback** — say "that shot is good / meh / bad"; skill confidence updates and compounds across projects.
 
 ## How it works
 
-### 1. Slicing (`src/learn/slice.ts`)
-
-`ffprobe` reads duration, size, fps and audio. Cut points come from `ffmpeg -vf "select='gt(scene,0.32)',metadata=print:file=-"`. Cuts closer than `minShotSeconds` are dropped; beyond `maxShots` the pipeline degrades to equal-length segments (marked with an `ACT:` note). Each shot yields a mid-point `frame.jpg` (960w), three samples at 15/50/85% (640w) for the vision model, a re-encoded `clip.mp4` usable as a Ref2VA reference, plus one `audio.m4a` for the whole film. Written to `learning/slice.json`.
-
-### 2. Annotation (`src/learn/annotate.ts`)
-
-One vision request per shot, multiple images in temporal order, strict JSON in return: framing, angle, movement, lighting, grade, composition, subject, wardrobe, location, action, expression, dialogue, sound, description, `h3ShotBlock`, style tags. With a single frame, `movement` is forced to `unable to determine` so the model cannot invent camera work. Progress is written back per shot, so a failed run resumes where it stopped (`force` re-annotates).
-
-### 3. Distillation (`src/learn/distill.ts`)
-
-Shot annotations are compressed into observation notes, then a text model emits `style` (with a unified `stylePrefix`), `characters`, `locations`, `cameraGrammar`, `rhythm`, `prompting`, `sound`. Referenced shot ids must exist in the manifest; character/location `refImages` are mapped from ids to keyframes, with a weak text match as fallback. If distillation fails, a rule-based version (frequency statistics) takes over so the slicing work is never wasted — the reason lands in `learning.warning`. Outputs `learning/styleBible.json` and `.md`, plus a reusable pack in `data/library/packs/`.
-
-### 4. Skill extraction (`src/learn/skills.ts`)
-
-Turns "what this film looks like" into "what to do next time a shot looks like this". One text call yields 3–8 candidate skills (kind, Chinese rule, English prompt fragment, use/avoid conditions, evidence shots). Candidates are matched against existing skills (tag Jaccard + text Jaccard + fragment Jaccard, threshold 0.52); a match merges evidence and bumps the version, otherwise a new `candidate` is created. Evidence keyframes are copied into `data/skills/<id>/evidence/` so the skill survives project deletion. LLM failure falls back to rule-based extraction; extraction failure never invalidates the study, it only records a warning.
-
-### Skill lifecycle
-
-```
-extract ─▶ candidate (confidence ≈ 0.32)
-   ├─ matched by a new reference film → evidence +1, confidence up
-   ├─ positive review after rendering → active
-   ├─ evidence from 3 independent projects → active
-   ├─ ≥2 negative and more negative than positive → deprecated
-   └─ merge_skills → source deprecated + mergedInto
-```
-
-Confidence = base 0.32 + evidence bonus (≤0.25) + feedback bonus (≤0.40) + usage bonus (≤0.08). Model self-assessment never enters the score.
-
-Before planning, the agent calls `search_skills` and then `read_skill`, dropping prompt fragments into the shot plan. `plan_shots` / `generate_shot` record `skillIds`, and `record_skill_outcome` writes the feedback back.
-
-### Generation modes
-
-`prepareReferences` picks a mode by priority:
-
-| Condition | Mode | icompify task / model |
+| Stage | Module | What it does |
 | --- | --- | --- |
-| explicit `firstFrame` + `lastFrame` | FL2VA | `fl2va` / `minimax-h3-fl2va` |
-| explicit `firstFrame` | I2VA | `fl2va` / `minimax-h3-fl2va` |
-| `referenceShotIds` with clips | Ref2VA | `ref2va` / `minimax-h3-ref2va` |
-| only character/location stills | I2VA | `fl2va` / `minimax-h3-fl2va` |
-| nothing | T2VA | `t2va` / `minimax-h3-fl2va` |
+| Slicing | `learn/slice.ts` | Scene-cut detection, keyframes, samples, reference clips, audio |
+| Annotation | `learn/annotate.ts` | One vision request per shot, strict JSON, resumable |
+| Distillation | `learn/distill.ts` | Compress annotations into the style bible + reusable pack |
+| Skills | `learn/skills.ts` | 3–8 candidate skills per study, merged by similarity, scored by evidence |
+| Prompting | `generate/prompt.ts` | Picks T2VA / I2VA / FL2VA / L2VA / Ref2VA, then builds and validates the official H3 structure |
+| Rendering | `providers/video/` | icompify or a self-hosted gateway |
+| Assembly | `generate/stitch.ts` | Normalize every clip, then hard-cut or crossfade into a final asset |
 
-Reference order: characters (`<Subject N>` / `<Picture N>`) → locations (`<Picture N>`) → reference clips (`<Video N>`). Platform limits: 4 images, 3 videos, 4–15 seconds, ≤140MB per asset. The tool accepts 1–15s and falls back to 4s+trim for short shots.
+The agent is a thin scheduler over these; each stage is an independent function you can run on its own. Details, data contracts and design rationale: **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 
-Prompts come from an LLM director call that must follow the official structure; anything missing, misordered, or over 7000 characters falls back to a deterministic skeleton that is valid by construction. `validatePrompt` enforces field presence and order, verbatim alignment sentences, six sections for Ref2VA, and the length cap.
+```
+src/
+├── server.ts      Bun HTTP + SSE + static hosting
+├── agent/         conversation loop, system prompt, tool handlers
+├── learn/         slice → annotate → distill → extract skills
+├── generate/      reference decision, H3 prompt, single shot, stills, stitching
+├── providers/     llm / image / video / download — protocol only
+├── store/         projects, manifests, sessions, style packs, skills
+└── util/          fs, ffmpeg, ssh, duration
+web/               dependency-free HTML/CSS/JS front end
+skills/            public read-only skill library
+docs/              deploy, local GPU, skills, xhs, H3 prompting, examples
+```
 
 ## Cost and safety guards
 
 - `build_shot_prompt`, `plan_shots`, skill operations: **free**.
-- `generate_shot`: **billed**, and refuses to run without `confirmed=true`. The agent must show the shot plan and prompt and get explicit consent first.
-- `study_reference_video` and `extract_skills` call paid models; progress is streamed so you can watch spend.
-- API keys live only in `data/settings.json` (chmod-friendly, git-ignored, masked in API responses). The repo ships a `pre-commit` hook that rejects staged secrets.
-- Reference footage is used for **style, camera work and art direction only**. Replicating a real person's identity is not the default; you are responsible for rights if you explicitly ask for it.
-
-## Project layout
-
-```
-src/
-├── server.ts             Bun HTTP + SSE + static hosting
-├── cli.ts                terminal chat
-├── config.ts             settings load/save (masking, secret preservation)
-├── types.ts              domain models
-├── agent/                conversation loop, system prompt, 23 tool handlers
-├── learn/                slice → annotate → distill → extract skills → orchestrate
-├── generate/             reference decision, H3 prompt, single shot, stills
-├── providers/            llm / image (+local direct/SSH) / download(xhs) / video(icompify + local gateway) — protocol only
-├── store/                projects, manifests, sessions, style packs, skills
-└── util/                 fs, ffmpeg, ssh and duration primitives
-web/                      dependency-free HTML/CSS/JS front end
-skills/                    public read-only skill library (knowledge only, no evidence images)
-docs/                     deploy, local GPU, skills, xhs download, H3 prompting, examples
-```
-
-Data on disk (`data/`, ignored by git):
-
-```
-data/
-├── settings.json                     # keys — never commit
-├── cache/xhs/<noteId>-<ts>/          # raw yt-dlp downloads
-├── library/packs/<projectId>.json    # reusable style packs
-├── skills/<id>/{skill.json,SKILL.md,evidence/}
-└── projects/<projectId>/
-    ├── project.json  session.json
-    ├── learning/{slice.json,styleBible.json,.md,audio.m4a,shots/s01/...}
-    └── assets/{sources,stills,videos,uploads}/
-```
-
-`Project` is the single source of truth: `brief`, `learning`, `styleBible`, `plan[]`, `assets[]`. Shot plans store only `referenceShotIds`, never duplicated clips.
+- `generate_shot`: **billed**, and refuses to run without `confirmed=true`. The agent must show the plan and prompt and get explicit consent first.
+- API keys live only in `data/settings.json` (git-ignored, masked in API responses). A `pre-commit` hook rejects staged secrets.
+- Reference footage is used for **style, camera work and art direction only**. Replicating a real person's identity is not the default.
 
 ## Status
 
 Verified end to end:
 
-- Local slicing on a 12-second / 3-shot sample: scene detection, keyframes, samples, clips, audio.
-- Study pipeline with `deepseek-v4.1-flash`: 3 shots in ~4 minutes, usable characters / locations / camera / lighting / rhythm output.
-- Skill library: 24 skills across three studies, written to `skill.json` + `SKILL.md` + evidence images; positive outcomes promote candidates to `active`; Chinese lexical search hits.
-- Agent tool chain through LiteLLM: `read_learning_shots → update_brief → plan_shots → build_shot_prompt` produced a valid 6309-character Ref2VA prompt.
-- Xiaohongshu download with a real note (9.45s, 720×1280, with audio), including short-link/URL/share-text parsing and failure branches.
-- Server, SSE, settings API, project file access, skills API, front-end rendering.
-- Front-end media lightbox: keyframes, stills, skill evidence and generated videos open in an in-page dialog (image / video / audio) with backdrop and ESC close; no new tab.
-- Chat Markdown: assistant messages render headings, lists, tables, fenced code and safe links in-page; raw HTML is escaped and dangerous URLs are rejected.
-- Chat uploads: images/videos can be attached or dragged into the composer, stored under `assets/uploads/`, kept in session history, and bound to a shot via `set_shot_references` (images → Ref2VA, first/last frames → I2VA/FL2VA).
-- Local image backend: `generate_still` either spawns the generation script on this host (`image.local.mode=auto/direct`) or calls it over SSH with scp-transferred reference frames, recording `backend/model/references` on the asset. Verified on an RTX 5090 running Qwen-Image-2.1-Turbo: text-only 1344×768 took 38.8s on-device / 70.8s wall-clock over SSH; direct mode measured 159s on-device / 182s wall-clock on a cold pipeline load (1.03MB). SSH argument quoting and remote temp-dir cleanup are covered by a stub test.
-- Local video gateway backend: `video.provider=local` drives a self-hosted job gateway. One real T2VA run (4s, 832×480, 20 steps) completed in 361s including cold load and produced a 6.67MB 24fps mp4 with audio. Tail-frame and reference-video inputs are rejected; Ref2VA uses the first reference image only.
-- One real billed H3 T2VA render: 9s, 9:16, 768×1344, with audio, ~141s queue+inference; a VLM three-frame check rated it "highly consistent" with minor camera drift and a slight finger/frame fusion.
-- One real billed H3 Ref2VA render from a character still + an empty location still: 9s, 9:16, 768×1344, with audio, ~248s; the VLM check rated identity, room and framing "highly consistent", with no crop or drift and only minor hand/switch-panel artifacts.
-- A second reference (120s Xiaohongshu climbing video, 16 shots): 8 skills extracted; a 9s Ref2VA climbing shot rendered in ~248s and rated "highly consistent" for action, identity and gym layout; five camera/lighting/color skills moved to `active` (0.80).
-- Timeline stitching: `stitch_shots` normalizes clips with ffmpeg, then hard-cuts or crossfades into a final H.264/AAC asset. Verified on the 4-shot `名画上街` project: 20.73s hard cut, 19.84s with a 0.3s crossfade.
-- Short-shot handling: `plan_shots` accepts 1–15s; local 4s→2s trim is verified with ffmpeg. H3's 2/3s direct tier is exposed via `experimentalDuration=true` but has not been paid-tested yet.
+- Slicing, study pipeline and skill extraction on two real references (a 12-second 3-shot sample and a 120-second 16-shot Xiaohongshu clip); 24 skills accumulated with evidence images and working lexical search.
+- Real billed H3 renders: T2VA (9s, 9:16, with audio, ~141s) and Ref2VA from a character still + empty set still (9s, ~248s). VLM frame checks rated both "highly consistent" with only minor hand/framing artifacts.
+- Agent tool chain through LiteLLM, server + SSE, settings API, project file access, skills API, front-end rendering.
+- Front end: in-page media lightbox, chat Markdown, chat uploads bound to shots via `set_shot_references`.
+- Timeline stitching: 4-shot project → 20.73s hard cut and 19.84s crossfade.
+- Short shots: `plan_shots` accepts 1–15s; 4s→2s local trim verified with ffmpeg.
+- Local GPU backends: stills via direct spawn or SSH (verified on an RTX 5090), and a self-hosted H3 video gateway (one real T2VA run, 361s including cold load).
 
-Not yet verified: real I2VA / FL2VA renders (request shape mirrors the Toonflow provider; T2VA and Ref2VA are proven), and H3's direct 2/3s tier (the local 4s+trim fallback is verified with a mocked provider).
+Not yet verified: real I2VA / FL2VA renders (request shape mirrors the Toonflow provider; T2VA and Ref2VA are proven), and H3's direct 2/3s tier (the 4s+trim fallback is verified with a mocked provider).
 
 ## Limitations
 
-- Shot detection is heuristic: no gradual transitions, and films longer than `learning.maxShots` degrade to equal segments.
-- Annotation is serial: ~10–20 minutes for 40 shots. Failures resume from the last completed shot.
-- Skills are retrieved lexically, not by embedding.
-- Basic assembly is implemented (hard cut / crossfade), but subtitles, complex transitions, audio mixing and multi-track editing are not.
-- H3's shorter 2/3s tiers are experimental; the safe default is 4s generation plus local trim.
-- Remote image APIs are text-to-image only. Reference-image conditioning works only on the local backend, which feeds up to 3 frames through `--ref`.
-- Each local still is its own process, so the pipeline is reloaded per image; measured end-to-end is ~59–71s over SSH (including transfer), versus ~39–42s on-device for a ~31GB model. `mode=direct` skips the transfer overhead but still pays the per-process load.
-- Local H3 video goes through a single-worker gateway: H3 and Qwen cannot share the 32GB card concurrently, and local H3 lacks tail-frame and reference-video inputs (Ref2VA uses one reference image only).
-- Applying a style pack copies only referenced images and clips, not the source project's shot plan.
-- Chat Markdown is a small subset: no math, footnotes or raw HTML; raw HTML is shown as text.
-- Chat uploads are capped at 6 files per message, 20MB per image and 140MB per video; SVG is rejected.
-- Xiaohongshu download depends on `yt-dlp` and your own browser session; private, deleted or region-locked notes fail. Reading Safari cookies requires Full Disk Access for the terminal.
+- Shot detection is heuristic: no gradual transitions; long films degrade to equal segments.
+- Annotation is serial — ~10–20 minutes for 40 shots — and skills are retrieved lexically, not by embedding.
+- Assembly covers hard cuts and crossfades only; no subtitles, complex transitions, audio mixing or multi-track editing.
+- Local GPU stills reload the model per image; local H3 is a single-worker gateway that cannot share the card with stills.
+- Remote image APIs are text-to-image only; reference-image conditioning works on the local backend alone.
+- Chat Markdown is a small subset (no math, footnotes or raw HTML); uploads are capped at 6 files, 20MB per image, 140MB per video.
+- Xiaohongshu download depends on `yt-dlp` and your own browser session; private or deleted notes fail.
 
 ## Roadmap
 
@@ -246,23 +149,21 @@ Not yet verified: real I2VA / FL2VA renders (request shape mirrors the Toonflow 
 - Vector skill retrieval plus feedback-driven rule rewriting
 - Multi-track timeline editing, subtitles and audio mixing
 - Reusing reference audio / dialogue-driven lip sync
-- Route stills through the local gateway so batches avoid per-image model loads
-- Style pack browsing, diffing and incremental merge
 - Rendered-output QA (first/last frame drift, identity drift, camera amplitude)
 
 ## Documentation
 
+- [Deployment guide](docs/deploy.md) — dependencies, data layout, reverse proxy, backup, troubleshooting
+- [Local GPU backend](docs/local-gpu.md) — direct / SSH stills, video gateway contract, limits
+- [Architecture](ARCHITECTURE.md) — request lifecycle, data contracts, design rationale
 - [Skill library](docs/skills.md) — lifecycle, matching, confidence
 - [Xiaohongshu download](docs/xhs-download.md) — login state, failure modes
 - [H3 prompting](docs/h3-prompting.md) — official prompt structure
-- [Deployment guide](docs/deploy.md) — dependencies, data layout, reverse proxy, backup, troubleshooting
-- [Local GPU backend](docs/local-gpu.md) — direct / SSH image setup, video gateway contract, limits
-- [Architecture](ARCHITECTURE.md) — request lifecycle and design rationale
 - Examples: [style bible](docs/examples/style-bible-example.md) · [Ref2VA prompt](docs/examples/ref2va-prompt-example.txt) · [skill](docs/examples/skill-example.md) · [generated shot](docs/examples/generated-shot-example.md) · [Ref2VA with stills](docs/examples/ref2va-with-stills-example.md) · [climbing shot](docs/examples/xhs-climbing-example.md)
 
 ## Contributing
 
-Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) first. Please read [SECURITY.md](SECURITY.md) before reporting anything that looks like a credential leak.
+Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Read [SECURITY.md](SECURITY.md) before reporting anything that looks like a credential leak.
 
 ## License
 
@@ -270,4 +171,4 @@ Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) 
 
 ## Disclaimer
 
-This tool is meant for learning *style, camera language and art direction*. Do not use it to impersonate real people, to redistribute other creators' footage, or to bypass paywalls and login walls. Xiaohongshu downloading relies on your own logged-in browser session and does not store cookies; you are responsible for complying with the platform's terms and with local copyright law. Generated content is your responsibility.
+This tool is meant for learning *style, camera language and art direction*. Do not use it to impersonate real people, redistribute other creators' footage, or bypass paywalls and login walls. Xiaohongshu downloading relies on your own logged-in browser session and stores no cookies; complying with platform terms and copyright law is your responsibility. Generated content is your responsibility.

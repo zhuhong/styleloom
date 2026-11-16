@@ -61,6 +61,26 @@ chmod 600 data/settings.json
 | `llm.visionModel` | 支持图片输入的模型，逐镜拉片用 |
 | `video.apiKey` | icompify Key，云端出片必需 |
 
+其余字段按需调整：
+
+| 字段 | 默认 | 说明 |
+| --- | --- | --- |
+| `server.host` | `127.0.0.1` | 绑定地址；`0.0.0.0` 才会被局域网访问，见 [第 6 节](#6-局域网与反向代理) |
+| `server.port` | `8787` | 端口；多实例时每个实例要不同 |
+| `video.baseUrl` | `https://api.icompify.com` | icompify 地址 |
+| `video.model` / `referenceModel` | `minimax-h3-fl2va` / `minimax-h3-ref2va` | 文生/首尾帧 与 参考模型 |
+| `video.shortEdge` / `steps` | `768` / `50` | 云端输出短边与推理步数 |
+| `video.pollIntervalMs` / `maxWaitMs` | `10000` / `3600000` | 轮询间隔与最长等待 |
+| `xhs.ytDlpPath` | `yt-dlp` | 二进制路径 |
+| `xhs.cookiesFromBrowser` | `chrome` | `chrome` / `safari` / `firefox` / `edge` / 留空表示不读 Cookie |
+| `xhs.referer` / `userAgent` / `timeoutMs` | 见示例文件 | 下载请求头与超时 |
+| `ffmpeg.ffmpegPath` / `ffprobePath` | `ffmpeg` / `ffprobe` | 二进制路径，可写绝对路径 |
+| `learning.sceneThreshold` | `0.32` | 切镜阈值，越低切点越多 |
+| `learning.minShotSeconds` | `0.6` | 最短镜头，短于此的切点丢弃 |
+| `learning.maxShots` | `40` | 上限；超过则退化为等分切片 |
+| `learning.sampleCount` | `3` | 每镜送视觉模型的采样帧数（1–3） |
+| `learning.keepClips` | `true` | 是否保留每镜 `clip.mp4`（关掉省磁盘，但 Ref2VA 参考片段不可用） |
+
 `bun start` 输出会告诉你实际生效的路径，可用于确认部署是否正确：
 
 ```text
