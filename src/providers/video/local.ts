@@ -54,10 +54,10 @@ function wait(signal: AbortSignal, ms: number) {
 function pickLocalMode(request: VideoJob): LocalMode {
   const notes: string[] = [];
   if ((request.referenceVideos?.length ?? 0) > 0) {
-    throw new Error("本地 5090 网关不支持参考视频，请把 video.provider 改为 icompify，或移除参考视频");
+    throw new Error("本地网关不支持参考视频，请把 video.provider 改为 icompify，或移除参考视频");
   }
   if (request.lastFrame) {
-    throw new Error("本地 5090 网关不支持尾帧（FL2VA/L2VA），请改用 icompify 或去掉尾帧");
+    throw new Error("本地网关不支持尾帧（FL2VA/L2VA），请改用 icompify 或去掉尾帧");
   }
   if (request.firstFrame) return { model: "h3Fl2va", task: "i2va", refs: [request.firstFrame], notes };
   const images = request.referenceImages ?? [];
@@ -95,7 +95,7 @@ async function cancelGatewayJob(base: string, settings: Settings, jobId: string)
 }
 
 /**
- * 本机 5090 视频生成：styleloom → diffsynthGateway.py → h3_*.py。
+ * 本地视频生成：styleloom → 本地网关 → 推理脚本。
  * 网关是单 worker 串行队列，H3 约 30G 显存，和 Qwen 出图不能并发。
  */
 export async function generateLocalVideoJob(request: VideoJob, settings: Settings): Promise<VideoResult> {

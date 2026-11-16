@@ -339,7 +339,7 @@ export const toolSpecs: ToolSpec[] = [
   },
   {
     name: "generate_still",
-    description: "生成定妆照或场景照。5090 本机直连/SSH 免费，远程图片接口按张计费；都不可用时回退为参考片关键帧。",
+    description: "生成定妆照或场景照。本地 GPU（直连/SSH）免费，远程图片接口按张计费；都不可用时回退为参考片关键帧。",
     parameters: {
       type: "object",
       properties: {
@@ -352,7 +352,7 @@ export const toolSpecs: ToolSpec[] = [
   },
   {
     name: "generate_shot",
-    description: "调用视频后端生成单个镜头视频：icompify 按次计费，本地 5090 网关免费但占用显存。时长默认取分镜；低于 4 秒时默认按 4 秒生成后本地裁剪，只有 experimentalDuration=true 才直接请求短时长（用于验证 H3 档位）。video.provider=local 时不支持尾帧、参考视频，ref2va 只用第 1 张参考图。必须先向用户展示分镜/提示词并获得明确同意，然后传 confirmed=true。",
+    description: "调用视频后端生成单个镜头视频：icompify 按次计费，本地 GPU 网关免费但占用显存。时长默认取分镜；低于 4 秒时默认按 4 秒生成后本地裁剪，只有 experimentalDuration=true 才直接请求短时长（用于验证 H3 档位）。video.provider=local 时不支持尾帧、参考视频，ref2va 只用第 1 张参考图。必须先向用户展示分镜/提示词并获得明确同意，然后传 confirmed=true。",
     parameters: {
       type: "object",
       properties: {

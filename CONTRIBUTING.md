@@ -22,6 +22,8 @@ bun start          # http://127.0.0.1:8787
 
 `bun run chat` runs the terminal client. You need `ffmpeg` / `ffprobe` on `PATH`; `yt-dlp` is only required for the Xiaohongshu downloader.
 
+Deployment (data layout, reverse proxy, backup, troubleshooting) is covered in [docs/deploy.md](docs/deploy.md). Optional self-hosted GPU backends are in [docs/local-gpu.md](docs/local-gpu.md).
+
 ## Conventions
 
 - Bun + TypeScript, ES modules, **zero runtime dependencies**. Do not add one without discussing it.
@@ -40,6 +42,7 @@ bun start          # http://127.0.0.1:8787
 3. Update the workflow section of `src/agent/prompt.ts` — otherwise the model will never call it correctly.
 4. Give billed / download / skill tools a failure message and a recovery path.
 5. Update `README.md`, `README.zh-CN.md`, `ARCHITECTURE.md` and the relevant `docs/*.md`.
+6. If the tool touches deployment, config paths or a new backend, also update `docs/deploy.md` / `docs/local-gpu.md`.
 
 ## Checking your change
 

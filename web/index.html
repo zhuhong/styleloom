@@ -91,14 +91,14 @@
           <label>API Key<input name="video.apiKey" type="password" placeholder="留空或保持 ********" /></label>
           <label>文生/首尾帧模型<input name="video.model" /></label>
           <label>参考模型<input name="video.referenceModel" /></label>
-          <p class="dialogHint"><code>icompify</code> 走远程接口，按次计费；<code>local</code> 走本机 5090 网关，免费但占用显存，不需要 API Key。</p>
+          <p class="dialogHint"><code>icompify</code> 走远程接口，按次计费；<code>local</code> 走本地 GPU 网关，免费但占用显存，不需要 API Key。</p>
         </section>
         <section>
-          <h3>5090 视频网关（provider=local）</h3>
+          <h3>本地视频网关（provider=local）</h3>
           <label>网关地址<input name="video.local.baseUrl" placeholder="http://127.0.0.1:8000" /></label>
           <label>网关口令<input name="video.local.token" type="password" placeholder="留空或保持 ********" /></label>
           <label>输出短边<input name="video.local.shortEdge" placeholder="480" /></label>
-          <p class="dialogHint">启动：<code>/home/zhuh/miniconda3/envs/diffsynth/bin/python /home/zhuh/source_code/diffsynth_run/diffsynthGateway.py --port 8000</code>。单 worker 串行，H3 与 Qwen 不能同时跑；不支持尾帧、参考视频，ref2va 只用第 1 张参考图。</p>
+          <p class="dialogHint">网关需自行部署并实现 <code>/v1/jobs</code> 接口，见 <code>docs/local-gpu.md</code>。单 worker 串行，出图与出片不能同时跑；不支持尾帧、参考视频，ref2va 只用第 1 张参考图。</p>
         </section>
         <section>
           <h3>小红书视频下载</h3>
@@ -114,17 +114,17 @@
           <label>API Key<input name="image.apiKey" type="password" /></label>
           <label>模型<input name="image.model" placeholder="例如 qwen/qwen-image-2.1-turbo" /></label>
           <label>尺寸<input name="image.size" placeholder="2K 或 1344x768" /></label>
-          <p class="dialogHint">接口类型填 <code>local</code> 只走 5090；填 <code>auto</code> 优先可用后端，远程不可用/未配置时回退。5090 免费，远程按张计费。</p>
+          <p class="dialogHint">接口类型填 <code>local</code> 只走本地 GPU；填 <code>auto</code> 优先可用后端，远程不可用/未配置时回退。本地免费，远程按张计费。</p>
         </section>
         <section>
-          <h3>5090 本地 Qwen（直连或 SSH，可选）</h3>
+          <h3>本地 GPU 出图（直连或 SSH，可选）</h3>
           <label>连接方式<input name="image.local.mode" placeholder="auto / direct / ssh" /></label>
-          <label>SSH 主机<input name="image.local.host" placeholder="5090（仅 ssh 模式需要）" /></label>
+          <label>SSH 主机<input name="image.local.host" placeholder="user@host（仅 ssh 模式需要）" /></label>
           <label>SSH 命令<input name="image.local.sshBin" placeholder="ssh" /></label>
           <label>SCP 命令<input name="image.local.scpBin" placeholder="scp" /></label>
-          <label>Python 路径<input name="image.local.pythonBin" placeholder="/home/zhuh/miniconda3/envs/diffsynth/bin/python" /></label>
-          <label>脚本路径<input name="image.local.script" placeholder="/home/zhuh/source_code/diffsynth_run/qwen_image_gen2.py" /></label>
-          <label>工作目录<input name="image.local.workdir" placeholder="/home/zhuh/source_code/diffsynth_run" /></label>
+          <label>Python 路径<input name="image.local.pythonBin" placeholder="/path/to/python" /></label>
+          <label>脚本路径<input name="image.local.script" placeholder="/path/to/generate.py" /></label>
+          <label>工作目录<input name="image.local.workdir" placeholder="/path/to/workdir" /></label>
           <label>输出短边<input name="image.local.shortEdge" placeholder="768" /></label>
           <label>去噪步数<input name="image.local.steps" placeholder="8" /></label>
           <label>显存模式<input name="image.local.vram" placeholder="offload / auto / cuda" /></label>

@@ -33,12 +33,12 @@ function capabilitySnapshot(settings: Settings) {
   const remoteImage = settings.image.baseUrl && settings.image.model;
   const localLabel = localImage.mode === "direct" ? "本机直连" : localImage.mode === "ssh" ? `SSH ${localImage.host}` : "auto 本机优先";
   const imageLine = useLocal
-    ? `5090 本地 Qwen（${localLabel}，${settings.image.api === "auto" ? "失败回退远程" : "仅本地"}）${remoteImage ? `；远程备用：${settings.image.model}` : ""}`
+    ? `本地 GPU 出图（${localLabel}，${settings.image.api === "auto" ? "失败回退远程" : "仅本地"}）${remoteImage ? `；远程备用：${settings.image.model}` : ""}`
     : remoteImage
       ? `已配置（${settings.image.model}）`
       : "未配置（定妆照会回退为参考帧）";
   const videoLine = settings.video.provider === "local"
-    ? `本地 5090 网关（${settings.video.local.baseUrl}；不支持尾帧/参考视频，ref2va 只用单张参考图）`
+    ? `本地视频网关（${settings.video.local.baseUrl}；不支持尾帧/参考视频，ref2va 只用单张参考图）`
     : settings.video.apiKey
       ? `icompify 已配置（${settings.video.model} / ${settings.video.referenceModel}）`
       : "未配置 icompify API Key";

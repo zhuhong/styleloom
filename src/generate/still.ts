@@ -44,7 +44,7 @@ export async function generateStill(options: {
   const root = projectDir(project.id);
   await ensureDir(join(root, "assets", "stills"));
 
-  // 本地 5090 Qwen 支持多张条件图；优先用学习阶段抽出的真实参考帧，
+  // 本地出图后端支持多张条件图；优先用学习阶段抽出的真实参考帧，
   // 没有参考帧时才用已经生成过的定妆照/场景照。
   const references: string[] = [];
   for (const relative of [...(sheet.refImages ?? []), ...(sheet.stillImages ?? [])]) {
@@ -83,7 +83,7 @@ export async function generateStill(options: {
       backend: image.backend,
       model: image.model,
       references: usedReferences,
-      note: image.backend === "local" ? `5090 Qwen 本地生成${image.seconds ? `，${image.seconds.toFixed(1)}s` : ""}` : undefined,
+      note: image.backend === "local" ? `本地 GPU 生成${image.seconds ? `，${image.seconds.toFixed(1)}s` : ""}` : undefined,
     };
   }
 

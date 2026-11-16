@@ -22,7 +22,7 @@ export type Settings = {
     steps: number;
     pollIntervalMs: number;
     maxWaitMs: number;
-    /** 本机 5090 上的 diffsynthGateway.py；provider=local 时生效。 */
+    /** 本地 GPU 上的视频网关；provider=local 时生效。 */
     local: {
       baseUrl: string;
       /** 网关启动时 --token 对应的口令，走 X-Toonflow-Gateway-Token 头。 */
@@ -37,7 +37,7 @@ export type Settings = {
     apiKey: string;
     model: string;
     size: string;
-    /** 5090 本地 Qwen-Image-2.1-Turbo：本机直连或 SSH 调用 qwen_image_gen2.py。 */
+    /** 本地 GPU 出图脚本：本机直连（direct）或 SSH 调用远端脚本（ssh）。 */
     local: {
       /**
        * auto = 本机存在脚本与 Python 就直连，否则配了 host 就走 SSH；
@@ -118,9 +118,10 @@ export const defaultSettings: Settings = {
       host: "",
       sshBin: "ssh",
       scpBin: "scp",
-      pythonBin: "/home/zhuh/miniconda3/envs/diffsynth/bin/python",
-      script: "/home/zhuh/source_code/diffsynth_run/qwen_image_gen2.py",
-      workdir: "/home/zhuh/source_code/diffsynth_run",
+      // 留空表示未配置本地出图；填写方式见 docs/local-gpu.md
+      pythonBin: "",
+      script: "",
+      workdir: "",
       shortEdge: 768,
       steps: 8,
       vram: "offload",

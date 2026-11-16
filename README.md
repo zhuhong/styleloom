@@ -77,6 +77,8 @@ Prefer the terminal? `bun run chat`.
 
 Sanity check: `bun run typecheck`.
 
+Running it for real — persistent service, LAN access, reverse proxy, backup, troubleshooting — see the [deployment guide](docs/deploy.md). Optional self-hosted GPU backends (free but exclusive VRAM) are in [docs/local-gpu.md](docs/local-gpu.md).
+
 ### Configuration
 
 Everything lives in `data/settings.json` (or the in-app **Settings** dialog). `data/` is git-ignored; keys are masked on read and preserved as `********` when the UI saves.
@@ -85,12 +87,12 @@ Everything lives in `data/settings.json` (or the in-app **Settings** dialog). `d
 | --- | --- |
 | `llm.baseUrl` / `apiKey` / `model` | Any OpenAI-compatible text endpoint (default: local LiteLLM at `http://localhost:4000/v1`) |
 | `llm.visionModel` | Model that accepts images (default `deepseek-v4.1-flash`); Gemini etc. work too |
-| `video.provider` | `icompify` (default, billed remote) or `local` (RTX 5090 gateway at `video.local.baseUrl`) |
+| `video.provider` | `icompify` (default, billed remote) or `local` (self-hosted GPU gateway at `video.local.baseUrl`) |
 | `video.baseUrl` / `apiKey` | icompify open platform, default `https://api.icompify.com` |
 | `video.model` / `referenceModel` | `minimax-h3-fl2va` (text / first-last frame), `minimax-h3-ref2va` (reference image / video) |
-| `video.local.*` | Gateway `baseUrl` (`http://127.0.0.1:8000`), `token`, `shortEdge` (480). See [docs/5090-video.md](docs/5090-video.md) |
-| `image.*` | Stills backend. `image.api=local` renders on the **RTX 5090** (Qwen-Image-2.1-Turbo, free): `mode=auto/direct` spawns the script on this host, `mode=ssh` calls it remotely; `openrouter` / `openai` use a remote image API; `auto` prefers a usable 5090 and falls back. Empty → reference keyframes. See [docs/5090-image.md](docs/5090-image.md) |
-| `image.local.*` | `mode` (`auto` / `direct` / `ssh`), `host`, `pythonBin`, `script`, `workdir`, `shortEdge` (768), `steps` (8), `vram` (`offload`) |
+| `video.local.*` | Gateway `baseUrl` (`http://127.0.0.1:8000`), `token`, `shortEdge` (480). See [docs/local-gpu.md](docs/local-gpu.md) |
+| `image.*` | Stills backend. `image.api=local` renders on your own GPU (free): `mode=auto/direct` spawns the script on this host, `mode=ssh` calls it remotely; `openrouter` / `openai` use a remote image API; `auto` prefers a usable local backend and falls back. Empty → reference keyframes. See [docs/local-gpu.md](docs/local-gpu.md) |
+| `image.local.*` | `mode` (`auto` / `direct` / `ssh`), `host`, `pythonBin`, `script`, `workdir`, `shortEdge` (768), `steps` (8), `vram` (`offload`). Empty by default — fill in your own paths |
 | `xhs.*` | `ytDlpPath`, `cookiesFromBrowser` (chrome / safari / firefox / edge / empty), referer, UA, timeout |
 | `ffmpeg.*` | Binary paths, default `ffmpeg` / `ffprobe` |
 | `learning.*` | Scene threshold, minimum shot length, max shots, samples per shot, keep clips |
@@ -176,12 +178,12 @@ src/
 ├── agent/                conversation loop, system prompt, 23 tool handlers
 ├── learn/                slice → annotate → distill → extract skills → orchestrate
 ├── generate/             reference decision, H3 prompt, single shot, stills
-├── providers/            llm / image (+5090 direct/SSH) / download(xhs) / video(icompify + local gateway) — protocol only
+├── providers/            llm / image (+local direct/SSH) / download(xhs) / video(icompify + local gateway) — protocol only
 ├── store/                projects, manifests, sessions, style packs, skills
 └── util/                 fs, ffmpeg, ssh and duration primitives
 web/                      dependency-free HTML/CSS/JS front end
 skills/                    public read-only skill library (knowledge only, no evidence images)
-docs/                     skills, xhs download, 5090 image/video, H3 prompting, examples
+docs/                     deploy, local GPU, skills, xhs download, H3 prompting, examples
 ```
 
 Data on disk (`data/`, ignored by git):
@@ -213,8 +215,8 @@ Verified end to end:
 - Front-end media lightbox: keyframes, stills, skill evidence and generated videos open in an in-page dialog (image / video / audio) with backdrop and ESC close; no new tab.
 - Chat Markdown: assistant messages render headings, lists, tables, fenced code and safe links in-page; raw HTML is escaped and dangerous URLs are rejected.
 - Chat uploads: images/videos can be attached or dragged into the composer, stored under `assets/uploads/`, kept in session history, and bound to a shot via `set_shot_references` (images → Ref2VA, first/last frames → I2VA/FL2VA).
-- 5090 local image backend: `generate_still` spawns `qwen_image_gen2.py` directly when it runs on the RTX 5090 (`image.local.mode=auto/direct`), or over SSH with scp-transferred reference frames from another host, and records `backend/model/references` on the asset. Real runs on the RTX 5090 now work: text-only 1344×768 took 38.8s on-device / 70.8s wall-clock over SSH; direct mode measured 159s on-device / 182s wall-clock on a cold pipeline load (1.03MB). SSH paths, argument quoting and remote temp-dir cleanup are also covered by a stub test.
-- 5090 local H3 video backend: `video.provider=local` drives `diffsynthGateway.py`; one real T2VA run (4s, 832×480, 20 steps) completed in 361s including cold load and produced a 6.67MB 24fps mp4 with audio (107 frames after the 17k+5 grid snap). Tail-frame and reference-video inputs are rejected; Ref2VA uses the first reference image only.
+- Local image backend: `generate_still` either spawns the generation script on this host (`image.local.mode=auto/direct`) or calls it over SSH with scp-transferred reference frames, recording `backend/model/references` on the asset. Verified on an RTX 5090 running Qwen-Image-2.1-Turbo: text-only 1344×768 took 38.8s on-device / 70.8s wall-clock over SSH; direct mode measured 159s on-device / 182s wall-clock on a cold pipeline load (1.03MB). SSH argument quoting and remote temp-dir cleanup are covered by a stub test.
+- Local video gateway backend: `video.provider=local` drives a self-hosted job gateway. One real T2VA run (4s, 832×480, 20 steps) completed in 361s including cold load and produced a 6.67MB 24fps mp4 with audio. Tail-frame and reference-video inputs are rejected; Ref2VA uses the first reference image only.
 - One real billed H3 T2VA render: 9s, 9:16, 768×1344, with audio, ~141s queue+inference; a VLM three-frame check rated it "highly consistent" with minor camera drift and a slight finger/frame fusion.
 - One real billed H3 Ref2VA render from a character still + an empty location still: 9s, 9:16, 768×1344, with audio, ~248s; the VLM check rated identity, room and framing "highly consistent", with no crop or drift and only minor hand/switch-panel artifacts.
 - A second reference (120s Xiaohongshu climbing video, 16 shots): 8 skills extracted; a 9s Ref2VA climbing shot rendered in ~248s and rated "highly consistent" for action, identity and gym layout; five camera/lighting/color skills moved to `active` (0.80).
@@ -230,8 +232,8 @@ Not yet verified: real I2VA / FL2VA renders (request shape mirrors the Toonflow 
 - Skills are retrieved lexically, not by embedding.
 - Basic assembly is implemented (hard cut / crossfade), but subtitles, complex transitions, audio mixing and multi-track editing are not.
 - H3's shorter 2/3s tiers are experimental; the safe default is 4s generation plus local trim.
-- Remote image APIs are text-to-image only. Reference-image conditioning works only on the 5090 backend, which feeds up to 3 frames through `--ref`.
-- Each 5090 still is its own process, so the ~31GB pipeline is loaded per image; measured end-to-end is ~59–71s over SSH (including transfer), versus ~39–42s on-device. `mode=direct` skips the transfer overhead but still pays the per-process load. Batch dozens of stills on the 5090 itself with `--batch`.
+- Remote image APIs are text-to-image only. Reference-image conditioning works only on the local backend, which feeds up to 3 frames through `--ref`.
+- Each local still is its own process, so the pipeline is reloaded per image; measured end-to-end is ~59–71s over SSH (including transfer), versus ~39–42s on-device for a ~31GB model. `mode=direct` skips the transfer overhead but still pays the per-process load.
 - Local H3 video goes through a single-worker gateway: H3 and Qwen cannot share the 32GB card concurrently, and local H3 lacks tail-frame and reference-video inputs (Ref2VA uses one reference image only).
 - Applying a style pack copies only referenced images and clips, not the source project's shot plan.
 - Chat Markdown is a small subset: no math, footnotes or raw HTML; raw HTML is shown as text.
@@ -244,7 +246,7 @@ Not yet verified: real I2VA / FL2VA renders (request shape mirrors the Toonflow 
 - Vector skill retrieval plus feedback-driven rule rewriting
 - Multi-track timeline editing, subtitles and audio mixing
 - Reusing reference audio / dialogue-driven lip sync
-- Route stills through the 5090 gateway so batches avoid per-image model loads
+- Route stills through the local gateway so batches avoid per-image model loads
 - Style pack browsing, diffing and incremental merge
 - Rendered-output QA (first/last frame drift, identity drift, camera amplitude)
 
@@ -253,8 +255,8 @@ Not yet verified: real I2VA / FL2VA renders (request shape mirrors the Toonflow 
 - [Skill library](docs/skills.md) — lifecycle, matching, confidence
 - [Xiaohongshu download](docs/xhs-download.md) — login state, failure modes
 - [H3 prompting](docs/h3-prompting.md) — official prompt structure
-- [5090 local Qwen](docs/5090-image.md) — direct / SSH setup, settings, self-check
-- [5090 local H3 video](docs/5090-video.md) — gateway startup, mode mapping, capability limits
+- [Deployment guide](docs/deploy.md) — dependencies, data layout, reverse proxy, backup, troubleshooting
+- [Local GPU backend](docs/local-gpu.md) — direct / SSH image setup, video gateway contract, limits
 - [Architecture](ARCHITECTURE.md) — request lifecycle and design rationale
 - Examples: [style bible](docs/examples/style-bible-example.md) · [Ref2VA prompt](docs/examples/ref2va-prompt-example.txt) · [skill](docs/examples/skill-example.md) · [generated shot](docs/examples/generated-shot-example.md) · [Ref2VA with stills](docs/examples/ref2va-with-stills-example.md) · [climbing shot](docs/examples/xhs-climbing-example.md)
 
