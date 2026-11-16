@@ -9,6 +9,7 @@ import type { ChatAttachment, Project, SkillKind } from "./types";
 import { runAgentTurn } from "./agent/loop";
 import type { LlmMessage } from "./providers/llm";
 import { runProcess } from "./util/ffmpeg";
+import { listJobs, reconcileStaleJobs, startResumeJob, subscribeJobs } from "./generate/jobs";
 
 function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json; charset=utf-8" } });
@@ -115,9 +116,62 @@ function chatStream(projectId: string, message: string, attachments: ChatAttachm
   });
 }
 
+/**
+ * 渲染任务进度流：只推 job 快照，不参与对话。
+ * 浏览器关掉不影响服务端渲染（后台任务自己持有 AbortController）。
+ */
+function jobsStream(projectId: string) {
+  const encoder = new TextEncoder();
+  let cleanup: (() => void) | undefined;
+  const stream = new ReadableStream({
+    start(controller) {
+      let closed = false;
+      const send = (payload: unknown) => {
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+        } catch {
+          closed = true;
+          cleanup?.();
+        }
+      };
+      send({ type: "snapshot", jobs: listJobs(projectId) });
+      const unsubscribe = subscribeJobs(projectId, job => send({ type: "job", job }));
+      const heartbeat = setInterval(() => send({ type: "ping" }), 15_000);
+      cleanup = () => {
+        if (closed && !heartbeat) return;
+        clearInterval(heartbeat);
+        unsubscribe();
+        if (!closed) {
+          closed = true;
+          try {
+            controller.close();
+          } catch {
+            // 客户端已经断开
+          }
+        }
+      };
+    },
+    cancel() {
+      cleanup?.();
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    },
+  });
+}
+
 const settings = await loadSettings();
 await ensureDir(dataDir);
 if (!(await exists(settingsPath))) await saveSettings(defaultSettings);
+// 服务重启后内存里的渲染任务全丢，把盘上遗留的 generating 修正为 pending / failed。
+const repairedJobs = await reconcileStaleJobs().catch(() => [] as string[]);
+if (repairedJobs.length) console.log(`[reconcile] 修正遗留渲染状态：${repairedJobs.join("、")}`);
 const ffmpegCheck = await runProcess([settings.ffmpeg.ffmpegPath, "-version"]).catch(() => undefined);
 if (!ffmpegCheck || ffmpegCheck.code !== 0) {
   console.warn(`[warn] 找不到 ffmpeg（${settings.ffmpeg.ffmpegPath}），学习功能将不可用`);
@@ -216,6 +270,28 @@ const server = Bun.serve({
         }
         await saveProject(project);
         return json({ assets: uploaded });
+      }
+      const jobsMatch = path.match(/^\/api\/projects\/([^/]+)\/jobs$/);
+      if (jobsMatch) {
+        const projectId = decodeURIComponent(jobsMatch[1]);
+        await getProject(projectId);
+        if (request.method === "GET") return json({ jobs: listJobs(projectId) });
+        if (request.method === "POST") {
+          const body = (await request.json()) as { shotId?: unknown; action?: unknown };
+          const shotId = typeof body.shotId === "string" ? body.shotId.trim() : "";
+          if (!shotId) throw new Error("缺少 shotId");
+          if (body.action !== "resume") throw new Error(`不支持的操作：${String(body.action)}`);
+          const job = startResumeJob(projectId, shotId);
+          return json({ job });
+        }
+        return json({ error: "Method not allowed" }, 405);
+      }
+      const jobsStreamMatch = path.match(/^\/api\/projects\/([^/]+)\/jobs\/stream$/);
+      if (jobsStreamMatch) {
+        if (request.method !== "GET") return json({ error: "Method not allowed" }, 405);
+        const projectId = decodeURIComponent(jobsStreamMatch[1]);
+        await getProject(projectId);
+        return jobsStream(projectId);
       }
       const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/chat)?$/);
       if (projectMatch) {

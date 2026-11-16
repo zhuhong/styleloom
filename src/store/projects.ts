@@ -79,11 +79,40 @@ export async function getProject(id: string): Promise<Project> {
   return project;
 }
 
+/**
+ * 按项目串行化的写锁。
+ * 后台渲染任务与对话轮次可能同时改 project.json，不串行会互相覆盖。
+ */
+const projectLocks = new Map<string, Promise<unknown>>();
+
+export function withProjectLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
+  const previous = projectLocks.get(id) ?? Promise.resolve();
+  const next = previous.then(fn, fn);
+  // 无论成败都要释放锁，否则一次失败会永久阻塞该项目。
+  projectLocks.set(id, next.catch(() => undefined));
+  return next;
+}
+
 export async function saveProject(project: Project) {
   if (project.styleBible) project.styleBible = normalizeStyleBible(project.styleBible);
   project.updatedAt = nowIso();
-  await writeJson(projectFile(project.id), project);
+  await withProjectLock(project.id, () => writeJson(projectFile(project.id), project));
   return project;
+}
+
+/**
+ * 读最新盘上状态 → 交给 mutator 修改 → 写回。
+ * 后台任务用它，避免拿着旧快照覆盖对话轮次刚写的内容。
+ */
+export async function mutateProject<T>(id: string, mutator: (project: Project) => T | Promise<T>): Promise<T> {
+  return withProjectLock(id, async () => {
+    const project = await getProject(id);
+    const result = await mutator(project);
+    if (project.styleBible) project.styleBible = normalizeStyleBible(project.styleBible);
+    project.updatedAt = nowIso();
+    await writeJson(projectFile(id), project);
+    return result;
+  });
 }
 
 export async function getManifest(project: Project): Promise<SliceManifest | undefined> {

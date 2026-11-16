@@ -8,7 +8,8 @@ import { copyInto, ensureDir, exists, nowIso, safeJoin } from "../util/fs";
 import { addAsset, getManifest, projectDir } from "../store/projects";
 import { applyStylePack, listStylePacks } from "../store/library";
 import { studyReferenceVideo } from "../learn/study";
-import { generateShot, resumeShot } from "../generate/shot";
+import { resumeShot } from "../generate/shot";
+import { activeJobForShot, startRenderJob } from "../generate/jobs";
 import { generateStill } from "../generate/still";
 import { stitchShots } from "../generate/stitch";
 import { H3_SAFE_MIN_SECONDS, normalizeShotDuration } from "../util/duration";
@@ -734,19 +735,23 @@ async function generateShotTool(ctx: ToolContext, args: Args) {
       status: shot.status,
     };
   }
-  const result = await generateShot({
-    project: ctx.project,
-    settings: ctx.settings,
+  // 后台执行：立刻返回，让对话继续；进度走右侧面板，不占气泡，也不随浏览器断开而中断。
+  const job = startRenderJob({
+    projectId: ctx.project.id,
     shotId,
     promptOverride: optString(args, "promptOverride"),
     durationSeconds: optNumber(args, "durationSeconds"),
     experimentalDuration: args.experimentalDuration === true,
     skillIds: args.skillIds === undefined ? shot?.skillIds : stringArray(args, "skillIds"),
-    signal: ctx.signal,
-    onProgress: (percent, label) => ctx.emit({ type: "progress", scope: "generate_shot", percent, label }),
   });
-  ctx.emit({ type: "state", project: ctx.project });
-  return { ok: true, ...result };
+  return {
+    ok: true,
+    async: true,
+    jobId: job.id,
+    shotId,
+    status: job.status,
+    note: "已在后台开始渲染。进度显示在右侧「渲染」面板；本轮对话可以直接结束，也可以继续聊别的事。完成后用 list_assets 查看，失败或超时用 resume_shot 接回。",
+  };
 }
 
 async function resumeShotTool(ctx: ToolContext, args: Args) {

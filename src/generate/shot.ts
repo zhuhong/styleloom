@@ -23,6 +23,11 @@ export type GenerateShotOptions = {
   skillIds?: string[];
   signal: AbortSignal;
   onProgress: (percent: number, label: string) => void;
+  /**
+   * 持久化策略。默认整份写回（对话内同步调用）。
+   * 后台任务应传入「只合并渲染字段」的实现，避免用旧快照覆盖对话轮次刚写的内容。
+   */
+  persist?: (project: Project) => Promise<void>;
 };
 
 export type GenerateShotResult = {
@@ -81,10 +86,11 @@ export async function generateShot(options: GenerateShotOptions): Promise<Genera
       : undefined;
   const stampValue = stamp();
   let tempDir: string | undefined;
+  const persist = options.persist ?? saveProject;
   shot.status = "generating";
   shot.error = undefined;
   if (options.skillIds) shot.skillIds = [...new Set(options.skillIds)];
-  await saveProject(project);
+  await persist(project);
 
   try {
     onProgress(5, "准备参考素材与生成模式");
@@ -114,7 +120,7 @@ export async function generateShot(options: GenerateShotOptions): Promise<Genera
     shot.prompt = prompt;
     shot.promptMode = references.mode;
     shot.status = "promptReady";
-    await saveProject(project);
+    await persist(project);
 
     onProgress(18, `提交 ${references.mode.toUpperCase()} 任务`);
     const result = await generateVideoJob({
@@ -129,7 +135,7 @@ export async function generateShot(options: GenerateShotOptions): Promise<Genera
       onVideoId: videoId => {
         shot.videoId = videoId;
         shot.videoCreatedAt = new Date().toISOString();
-        void saveProject(project).catch(() => {});
+        void persist(project).catch(() => {});
       },
       onProgress: (status, elapsed, percent) => {
         const value = typeof percent === "number" ? 20 + Math.min(70, percent * 0.7) : 40;
@@ -172,7 +178,7 @@ export async function generateShot(options: GenerateShotOptions): Promise<Genera
       },
     });
     if (project.stage === "plan" || project.stage === "study") project.stage = "generate";
-    await saveProject(project);
+    await persist(project);
     for (const skillId of shot.skillIds ?? []) {
       await markSkillUsed(skillId, { projectId: project.id, shotId }).catch(() => undefined);
     }
@@ -203,7 +209,7 @@ export async function generateShot(options: GenerateShotOptions): Promise<Genera
       ? `${message}（任务已提交，video_id=${shot.videoId}，可用 resume_shot 继续等待，不会重复计费）`
       : message;
     shot.updatedAt = new Date().toISOString();
-    await saveProject(project);
+    await persist(project);
     throw error;
   } finally {
     if (tempDir) await removeDir(tempDir).catch(() => undefined);
@@ -219,6 +225,7 @@ export type ResumeShotOptions = {
   onProgress: (percent: number, label: string) => void;
   /** 只查状态并回报，不下载、不写素材 */
   probeOnly?: boolean;
+  persist?: (project: Project) => Promise<void>;
 };
 
 export type ResumeShotResult = {
@@ -316,7 +323,7 @@ export async function resumeShot(options: ResumeShotOptions): Promise<ResumeShot
     },
   });
   if (project.stage === "plan" || project.stage === "study") project.stage = "generate";
-  await saveProject(project);
+  await (options.persist ?? saveProject)(project);
   onProgress(100, `${shotId} 恢复完成`);
   return {
     shotId,

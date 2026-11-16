@@ -77,9 +77,9 @@ code { background: #1f2733; padding: 1px 5px; border-radius: 5px; font-size: 12p
 
 .chatPane { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); }
 .messages { flex: 1; min-height: 0; overflow: auto; padding: 22px 24px 12px; display: flex; flex-direction: column; gap: 14px; }
-.emptyState { margin: auto; max-width: 520px; text-align: center; color: var(--muted); }
+.emptyState { margin: auto; max-width: 560px; text-align: center; color: var(--muted); }
 .emptyState h2 { color: var(--text); font-weight: 600; font-size: 20px; margin-bottom: 8px; }
-.emptyState code { word-break: break-all; }
+.emptyState code { word-break: normal; overflow-wrap: anywhere; }
 
 .bubble { max-width: 88%; padding: 11px 14px; border-radius: var(--radius); white-space: pre-wrap; word-break: break-word; }
 .bubble.user { align-self: flex-end; background: #1d3b33; border: 1px solid #2b5c4c; }
@@ -151,6 +151,21 @@ code { background: #1f2733; padding: 1px 5px; border-radius: 5px; font-size: 12p
 .progress { margin-top: 8px; height: 4px; border-radius: 999px; background: #232b36; overflow: hidden; }
 .progress i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width 0.3s; }
 .progressLabel { margin-top: 5px; color: var(--muted); font-size: 11px; }
+.progressLabel.panelHint { color: #7dd3fc; }
+
+.jobCard { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; background: var(--panel); }
+.jobCard.running { border-color: #3a6b5c; }
+.jobCard.pending { border-color: #6b4d13; border-style: dashed; }
+.jobCard.failed { border-color: #5b2626; }
+.jobHead { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.jobHead b { font-variant-numeric: tabular-nums; }
+.jobElapsed { margin-left: auto; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.jobCard .progress { margin-top: 8px; height: 4px; border-radius: 999px; background: #232b36; overflow: hidden; }
+.jobCard .progress i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width 0.3s; }
+.jobLabel { margin-top: 5px; color: var(--muted); font-size: 11px; }
+.jobMeta { margin-top: 4px; color: #6b7684; font-size: 10px; word-break: break-all; font-family: ui-monospace, monospace; }
+.jobActions { display: flex; gap: 8px; margin-top: 8px; }
+.jobActions:empty { display: none; }
 
 .composer { display: flex; align-items: stretch; gap: 10px; padding: 12px 18px; border-top: 1px solid var(--line); background: rgba(18, 22, 28, 0.85); }
 .composer.dragging { background: rgba(52, 211, 153, 0.08); box-shadow: inset 0 0 0 1px #3a6b5c; }
@@ -373,9 +388,97 @@ code { background: #1f2733; padding: 1px 5px; border-radius: 5px; font-size: 12p
 .skillCard summary::before { content: "▸"; color: var(--muted); font-size: 10px; }
 .skillCard[open] summary::before { content: "▾"; }
 .skillName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-.skillKind { min-width: 44px; padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 10px; text-align: center; }
-.skillConfidence { margin-left: auto; color: var(--accent); font-size: 11px; font-variant-numeric: tabular-nums; }
+.skillKind { flex: none; min-width: 44px; padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 10px; text-align: center; white-space: nowrap; }
+.skillConfidence { flex: none; margin-left: auto; color: var(--accent); font-size: 11px; font-variant-numeric: tabular-nums; }
 .skillCard p { margin: 7px 0 0; font-size: 12px; color: #b9c2cf; }
 .skillInstruction { white-space: pre-wrap; }
 .skillCard pre { white-space: pre-wrap; word-break: break-word; max-height: 180px; overflow: auto; background: #0d1117; border: 1px solid var(--line); border-radius: 7px; padding: 8px; font-size: 11px; }
 .skillStats { font-size: 11px !important; color: var(--muted) !important; }
+
+/* 幽灵按钮统一规范：与 panel / line 形成一致的暗黑次级按键质感 */
+button.ghost, .ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  text-decoration: none;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+button.ghost:hover, .ghost:hover {
+  color: var(--text);
+  border-color: #3a4556;
+  background: var(--panel2);
+}
+button.ghost:focus-visible, .ghost:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* 语言切换：与 topbar 的 ghost 按钮高度对齐、同一视觉重量 */
+.langSwitch {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  height: 30px;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.langSwitch button {
+  height: 100%;
+  min-width: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s, background 0.15s;
+}
+.langSwitch button:hover {
+  color: var(--text);
+  background: var(--panel2);
+}
+.langSwitch button.active {
+  color: var(--accent);
+  font-weight: 600;
+  background: rgba(110, 231, 183, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(110, 231, 183, 0.35);
+}
+.langSwitch button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* 英文文案更长：防挤压与空间呼吸修正，不改整体布局 */
+.topActions { min-width: 0; gap: 8px; }
+.engineState { min-width: 0; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brand small { display: block; max-width: 46vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.inspectorTabs { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 2px; padding: 2px; }
+.inspectorTab { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; gap: 3px; padding: 6px 2px; font-size: 11.5px; }
+.inspectorTab span { padding: 0 4px; font-size: 9.5px; }
+
+.filterChip { white-space: nowrap; }
+.sectionHead { min-width: 0; }
+.sectionHead h3 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer #sendButton { width: auto; min-width: 78px; padding: 0 12px; white-space: nowrap; }
+.composerHint { line-height: 1.5; }
+
+.settingsDialog label span { line-height: 1.35; }
+html[lang="en"] .settingsDialog label { grid-template-columns: 176px 1fr; }

@@ -81,7 +81,7 @@ bun start            # http://127.0.0.1:8787
 2. **它开始学习** —— 切片 → 逐镜标注 → 风格圣经 → 抽技能，进度实时推送到页面。看完结果可以要求修正。
 3. **出定妆照 / 场景照** —— `generate_still`。
 4. **写分镜并预览** —— `plan_shots`，再 `build_shot_prompt`。两步都免费。
-5. **生成** —— `generate_shot(confirmed=true)`，必须先看过并同意分镜与提示词。
+5. **生成** —— `generate_shot(confirmed=true)`，必须先看过并同意分镜与提示词。渲染是**后台任务**：对话立刻返回，进度实时显示在右侧「渲染」Tab，关掉页面也不会中断。
 6. **给反馈** —— 说某个镜头"好 / 一般 / 差"，技能置信度会更新并跨项目累积。
 
 ## 工作原理
@@ -93,7 +93,7 @@ bun start            # http://127.0.0.1:8787
 | 归纳 | `learn/distill.ts` | 把标注压成风格圣经 + 可复用风格包 |
 | 技能抽取 | `learn/skills.ts` | 每次 3–8 条候选，按相似度合并，靠证据评分 |
 | 提示词 | `generate/prompt.ts` | 自动选 T2VA / I2VA / FL2VA / L2VA / Ref2VA，生成并校验官方结构 |
-| 生成 | `providers/video/` | icompify 或自建网关 |
+| 生成 | `providers/video/`、`generate/jobs.ts` | icompify 或自建网关；后台任务，不阻塞对话 |
 | 拼接 | `generate/stitch.ts` | 统一转码后硬切或叠化成片 |
 
 Agent 只是这些阶段的调度器，每一层都能单独运行。细节、数据契约与设计取舍见 **[ARCHITECTURE.md](ARCHITECTURE.md)**。

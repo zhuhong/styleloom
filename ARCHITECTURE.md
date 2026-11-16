@@ -143,6 +143,31 @@ Agent 在规划前 `search_skills`、命中后 `read_skill`，把 prompt fragmen
 
 校验规则（`validatePrompt`）：字段齐全且顺序正确、对齐句逐字匹配、Ref2VA 必须有六段、长度 ≤ 7000。
 
+### 渲染是后台任务
+
+`generate_shot` 不再把 HTTP 请求绑在渲染上：它把任务交给 `generate/jobs.ts` 的内存注册表，立刻返回 `jobId`。
+
+```
+浏览器 POST /chat
+  → Agent 调 generate_shot → startRenderJob() 立刻返回
+  → 本轮对话结束（用户可继续聊别的事）
+
+浏览器 GET /api/projects/:id/jobs/stream（EventSource）
+  ← 服务端每次进度变化推送 { type: "job", job }
+
+服务端后台
+  → generateShot(...) → 轮询 icompify → 落盘
+  → mergeShotState() 只合并该镜头字段
+```
+
+为什么这么做：
+
+- **不再随浏览器断开而中止**。以前 `AbortSignal` 来自 SSE 流，用户刷新页面就等于取消渲染；现在后台任务持有自己的 `AbortController`，与 HTTP 生命周期无关。
+- **进度不占对话气泡**。右侧「渲染」Tab 订阅 `/jobs/stream`，气泡里的 `generate_shot` 卡片只留一行「进度见右侧面板」。
+- **并发写盘安全**。`store/projects.ts` 增加按项目串行化的写锁；后台任务用 `mutateProject`（读最新 → 改 → 写），且只合并该镜头的渲染字段，不会用旧快照覆盖对话轮次刚写的内容。
+- **重启可恢复**。`reconcileStaleJobs()` 在启动时把盘上遗留的 `status="generating"` 修正为 `pending`（有 `videoId`）或 `failed`（无 `videoId`），配合 `resume_shot` 接回。
+- 同一镜头在渲染中重复提交会复用同一个 job，不会并发跑两次。
+
 ### 排队、超时与恢复
 
 icompify 的 H3 是共享 GPU 池，`status=queued` 时 `progress` 恒为 0、`inference_time_s` 为 null，排队时长不可控（实测出现过 44 分钟仍未开始推理，而正常情况 144 秒出片）。

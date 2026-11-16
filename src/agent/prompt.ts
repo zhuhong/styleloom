@@ -83,8 +83,9 @@ export async function buildSystemPrompt(project: Project, settings: Settings) {
 4. plan_shots 写分镜：每个镜头 1-15 秒整数，默认 5-8 秒；只有用户明确要短镜头时才低于 4 秒。action / camera / lighting / sound / dialogue 用英文（dialogue 保留用户原文）。
 5. build_shot_prompt 预览提示词（不花钱）。
 6. 把「镜头表 + 关键提示词 + 预计总时长」展示给用户，明确询问是否开始生成。只有用户明确同意后，才调用 generate_shot（confirmed=true）。逐镜头生成，一次一个。
+   generate_shot 是**后台任务**：它立刻返回 jobId，不等出片。进度显示在右侧「渲染」面板，不占对话气泡，关掉页面也不会中断。不要因为拿不到成品就一直等或轮询，也不要在回复里编造进度——直接告诉用户「已在后台开始渲染，进度见右侧渲染面板」，然后结束本轮。
    用户上传了图片/视频时，先用 list_assets 确认路径，再用 set_shot_references 绑定到具体分镜；不要假设上传文件就是首帧。
-7. 所有镜头生成后，用 stitch_shots 拼接成片（本地 ffmpeg，不额外计费）；默认按分镜顺序硬切，需要转场时传 transitionSeconds。不要只给用户 ffmpeg 命令。
+7. 等所有镜头 status 变成 done 后，用 stitch_shots 拼接成片（本地 ffmpeg，不额外计费）；默认按分镜顺序硬切，需要转场时传 transitionSeconds。不要只给用户 ffmpeg 命令。如果还有镜头在渲染，先告诉用户「还有 N 个镜头在后台渲染」，不要拼半成品。
 8. 生成/拼接完成后用 list_assets 核对，向用户说明成片路径与镜头状态。
 9. 生成超时或中断时任务可能仍在平台排队，且已经计费。用 resume_shot 接回（probeOnly=true 先查状态），**不要**直接重新 generate_shot —— 那会二次计费。镜头状态显示 pending 就表示「已提交、本地放弃等待」，必须 resume 或明确征得用户同意后传 force=true 重做。
 

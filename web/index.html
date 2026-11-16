@@ -12,49 +12,53 @@
         <span class="brandMark"></span>
         <div>
           <strong>StyleLoom</strong>
-          <small>从参考片学习，再用 MiniMax H3 生成</small>
+          <small data-i18n="app.tagline">从参考片学习，再用 MiniMax H3 生成</small>
         </div>
       </div>
       <div class="topActions">
-        <span id="engineState" class="engineState">检查配置…</span>
-        <button id="settingsButton" class="ghost">设置</button>
+        <span id="engineState" class="engineState" data-i18n="app.engineChecking">检查配置…</span>
+        <div class="langSwitch" role="group" aria-label="语言 / Language" title="语言 / Language">
+          <button type="button" data-lang="zh" aria-pressed="true" class="active" title="简体中文">中</button>
+          <button type="button" data-lang="en" aria-pressed="false" title="English">EN</button>
+        </div>
+        <button id="settingsButton" class="ghost" data-i18n="settings.title">设置</button>
       </div>
     </header>
 
     <main class="layout">
       <aside class="sidebar">
         <div class="sideHeader">
-          <span>项目</span>
-          <button id="newProjectButton" class="iconButton" title="新建项目">＋</button>
+          <span data-i18n="nav.projects">项目</span>
+          <button id="newProjectButton" class="iconButton" title="新建项目" data-i18n-title="nav.newProject">＋</button>
         </div>
         <div id="projectList" class="projectList"></div>
-        <div class="sideHeader packsHeader"><span>风格包</span></div>
+        <div class="sideHeader packsHeader"><span data-i18n="nav.stylePacks">风格包</span></div>
         <div id="packList" class="packList"></div>
       </aside>
 
       <section class="chatPane">
         <div id="messages" class="messages">
           <div class="emptyState">
-            <h2>先给一个参考片，或者直接说想法</h2>
-            <p>例：学习 <code>/Users/you/Movies/reference.mp4</code> 的运镜和光线，做一个 8 秒的雨夜街头镜头。</p>
-            <p>也可以直接粘贴小红书笔记链接（带 xsec_token 的完整 URL），我会先下载再拉片。</p>
-            <p>学习流程：ffmpeg 切片 → 视觉模型逐镜头拉片 → 归纳定妆照、场景照、运镜与节奏 → H3 生成。</p>
+            <h2 data-i18n="chat.emptyTitle">先给一个参考片，或者直接说想法</h2>
+            <p data-i18n-html="chat.emptyExample">例：学习 <code>/Users/you/Movies/reference.mp4</code> 的运镜和光线，做一个 8 秒的雨夜街头镜头。</p>
+            <p data-i18n="chat.emptyXhs">也可以直接粘贴小红书笔记链接（带 xsec_token 的完整 URL），我会先下载再拉片。</p>
+            <p data-i18n="chat.emptyFlow">学习流程：ffmpeg 切片 → 视觉模型逐镜头拉片 → 归纳定妆照、场景照、运镜与节奏 → H3 生成。</p>
           </div>
         </div>
         <form id="composer" class="composer">
-          <button id="attachButton" class="attachButton" type="button" title="上传参考图片或视频">＋</button>
+          <button id="attachButton" class="attachButton" type="button" title="上传参考图片或视频" data-i18n-title="composer.attachTitle">＋</button>
           <input id="fileInput" type="file" accept="image/*,video/*" multiple hidden />
           <div class="composerMain">
             <div id="pendingUploads" class="pendingUploads" hidden></div>
-            <textarea id="input" rows="2" placeholder="和 Agent 沟通：上传参考图/视频，或提供创作想法、修改意见…"></textarea>
+            <textarea id="input" rows="2" placeholder="和 Agent 沟通：上传参考图/视频，或提供创作想法、修改意见…" data-i18n-placeholder="composer.placeholder"></textarea>
           </div>
-          <button id="sendButton" type="submit">发送</button>
+          <button id="sendButton" type="submit" data-i18n="composer.send">发送</button>
         </form>
-        <div class="composerHint">Enter 发送 · Shift+Enter 换行 · 可拖入图片/视频作为参考 · 生成会产生 H3 费用，Agent 会先征得确认</div>
+        <div class="composerHint" data-i18n="composer.hint">Enter 发送 · Shift+Enter 换行 · 可拖入图片/视频作为参考 · 生成会产生 H3 费用，Agent 会先征得确认</div>
       </section>
 
       <aside id="inspector" class="inspector">
-        <div class="emptyState small"><p>选择或新建项目后，这里显示学习成果、分镜与素材。</p></div>
+        <div class="emptyState small"><p data-i18n="inspector.emptyProject">选择或新建项目后，这里显示学习成果、分镜与素材。</p></div>
       </aside>
     </main>
 
@@ -62,8 +66,8 @@
       <div class="mediaDialogBar">
         <div id="mediaDialogTitle" class="mediaDialogTitle"></div>
         <div class="mediaDialogActions">
-          <a id="mediaDialogOpen" class="ghost" target="_blank" rel="noreferrer">原文件 ↗</a>
-          <button id="mediaDialogClose" class="iconButton" type="button" aria-label="关闭">×</button>
+          <a id="mediaDialogOpen" class="ghost" target="_blank" rel="noreferrer" data-i18n="media.openOriginal">原文件 ↗</a>
+          <button id="mediaDialogClose" class="iconButton" type="button" aria-label="关闭" data-i18n-aria-label="misc.close">×</button>
         </div>
       </div>
       <div class="mediaDialogBody">
@@ -75,65 +79,65 @@
 
     <dialog id="settingsDialog" class="settingsDialog">
       <form method="dialog" id="settingsForm">
-        <h2>设置</h2>
-        <p class="dialogHint">密钥只保存在本机 <code>data/settings.json</code>。留空表示不配置。</p>
+        <h2 data-i18n="settings.title">设置</h2>
+        <p class="dialogHint" data-i18n-html="settings.secretsHint">密钥只保存在本机 <code>data/settings.json</code>。留空表示不配置。</p>
         <section>
-          <h3>语言 / 视觉模型</h3>
-          <label>请求地址<input name="llm.baseUrl" placeholder="http://localhost:4000/v1" /></label>
-          <label>API Key<input name="llm.apiKey" type="password" placeholder="留空或保持 ********" /></label>
-          <label>文本模型<input name="llm.model" placeholder="deepseek-v4.1-flash" /></label>
-          <label>视觉模型<input name="llm.visionModel" placeholder="ag-gemini-3.8-flash" /></label>
+          <h3 data-i18n="settings.llmSection">语言 / 视觉模型</h3>
+          <label><span data-i18n="settings.baseUrl">请求地址</span><input name="llm.baseUrl" placeholder="http://localhost:4000/v1" /></label>
+          <label><span data-i18n="settings.apiKey">API Key</span><input name="llm.apiKey" type="password" placeholder="留空或保持 ********" data-i18n-placeholder="settings.keepSecret" /></label>
+          <label><span data-i18n="settings.textModel">文本模型</span><input name="llm.model" placeholder="deepseek-v4.1-flash" /></label>
+          <label><span data-i18n="settings.visionModel">视觉模型</span><input name="llm.visionModel" placeholder="ag-gemini-3.8-flash" /></label>
         </section>
         <section>
-          <h3>MiniMax H3 视频</h3>
-          <label>视频后端<input name="video.provider" placeholder="icompify / local" /></label>
-          <label>请求地址<input name="video.baseUrl" placeholder="https://api.icompify.com" /></label>
-          <label>API Key<input name="video.apiKey" type="password" placeholder="留空或保持 ********" /></label>
-          <label>文生/首尾帧模型<input name="video.model" /></label>
-          <label>参考模型<input name="video.referenceModel" /></label>
-          <p class="dialogHint"><code>icompify</code> 走远程接口，按次计费；<code>local</code> 走本地 GPU 网关，免费但占用显存，不需要 API Key。</p>
+          <h3 data-i18n="settings.videoSection">MiniMax H3 视频</h3>
+          <label><span data-i18n="settings.videoProvider">视频后端</span><input name="video.provider" placeholder="icompify / local" /></label>
+          <label><span data-i18n="settings.baseUrl">请求地址</span><input name="video.baseUrl" placeholder="https://api.icompify.com" /></label>
+          <label><span data-i18n="settings.apiKey">API Key</span><input name="video.apiKey" type="password" placeholder="留空或保持 ********" data-i18n-placeholder="settings.keepSecret" /></label>
+          <label><span data-i18n="settings.textVideoModel">文生/首尾帧模型</span><input name="video.model" /></label>
+          <label><span data-i18n="settings.referenceModel">参考模型</span><input name="video.referenceModel" /></label>
+          <p class="dialogHint" data-i18n-html="settings.videoHint"><code>icompify</code> 走远程接口，按次计费；<code>local</code> 走本地 GPU 网关，免费但占用显存，不需要 API Key。</p>
         </section>
         <section>
-          <h3>本地视频网关（provider=local）</h3>
-          <label>网关地址<input name="video.local.baseUrl" placeholder="http://127.0.0.1:8000" /></label>
-          <label>网关口令<input name="video.local.token" type="password" placeholder="留空或保持 ********" /></label>
-          <label>输出短边<input name="video.local.shortEdge" placeholder="480" /></label>
-          <p class="dialogHint">网关需自行部署并实现 <code>/v1/jobs</code> 接口，见 <code>docs/local-gpu.md</code>。单 worker 串行，出图与出片不能同时跑；不支持尾帧、参考视频，ref2va 只用第 1 张参考图。</p>
+          <h3 data-i18n="settings.localVideoSection">本地视频网关（provider=local）</h3>
+          <label><span data-i18n="settings.gatewayUrl">网关地址</span><input name="video.local.baseUrl" placeholder="http://127.0.0.1:8000" /></label>
+          <label><span data-i18n="settings.gatewayToken">网关口令</span><input name="video.local.token" type="password" placeholder="留空或保持 ********" data-i18n-placeholder="settings.keepSecret" /></label>
+          <label><span data-i18n="settings.shortEdge">输出短边</span><input name="video.local.shortEdge" placeholder="480" /></label>
+          <p class="dialogHint" data-i18n-html="settings.localVideoHint">网关需自行部署并实现 <code>/v1/jobs</code> 接口，见 <code>docs/local-gpu.md</code>。单 worker 串行，出图与出片不能同时跑；不支持尾帧、参考视频，ref2va 只用第 1 张参考图。</p>
         </section>
         <section>
-          <h3>小红书视频下载</h3>
-          <label>yt-dlp 路径<input name="xhs.ytDlpPath" placeholder="yt-dlp" /></label>
-          <label>浏览器 Cookie<input name="xhs.cookiesFromBrowser" placeholder="chrome / safari / 留空" /></label>
-          <label>Referer<input name="xhs.referer" placeholder="https://www.xiaohongshu.com" /></label>
-          <p class="dialogHint">需要先在对应浏览器登录小红书；Safari 需要给终端完全磁盘访问权限。</p>
+          <h3 data-i18n="settings.xhsSection">小红书视频下载</h3>
+          <label><span data-i18n="settings.ytdlpPath">yt-dlp 路径</span><input name="xhs.ytDlpPath" placeholder="yt-dlp" /></label>
+          <label><span data-i18n="settings.browserCookie">浏览器 Cookie</span><input name="xhs.cookiesFromBrowser" placeholder="chrome / safari / 留空" data-i18n-placeholder="settings.placeholderBrowser" /></label>
+          <label><span data-i18n="settings.referer">Referer</span><input name="xhs.referer" placeholder="https://www.xiaohongshu.com" /></label>
+          <p class="dialogHint" data-i18n="settings.xhsHint">需要先在对应浏览器登录小红书；Safari 需要给终端完全磁盘访问权限。</p>
         </section>
         <section>
-          <h3>图片模型（定妆照 / 场景照，可选）</h3>
-          <label>接口类型<input name="image.api" placeholder="auto / local / openrouter / openai" /></label>
-          <label>请求地址<input name="image.baseUrl" placeholder="OpenAI 兼容 /v1 或 OpenRouter /v1" /></label>
-          <label>API Key<input name="image.apiKey" type="password" /></label>
-          <label>模型<input name="image.model" placeholder="例如 qwen/qwen-image-2.1-turbo" /></label>
-          <label>尺寸<input name="image.size" placeholder="2K 或 1344x768" /></label>
-          <p class="dialogHint">接口类型填 <code>local</code> 只走本地 GPU；填 <code>auto</code> 优先可用后端，远程不可用/未配置时回退。本地免费，远程按张计费。</p>
+          <h3 data-i18n="settings.imageSection">图片模型（定妆照 / 场景照，可选）</h3>
+          <label><span data-i18n="settings.imageApi">接口类型</span><input name="image.api" placeholder="auto / local / openrouter / openai" /></label>
+          <label><span data-i18n="settings.baseUrl">请求地址</span><input name="image.baseUrl" placeholder="OpenAI 兼容 /v1 或 OpenRouter /v1" data-i18n-placeholder="settings.placeholderImageBaseUrl" /></label>
+          <label><span data-i18n="settings.apiKey">API Key</span><input name="image.apiKey" type="password" /></label>
+          <label><span data-i18n="settings.model">模型</span><input name="image.model" placeholder="例如 qwen/qwen-image-2.1-turbo" data-i18n-placeholder="settings.placeholderImageModel" /></label>
+          <label><span data-i18n="settings.size">尺寸</span><input name="image.size" placeholder="2K 或 1344x768" data-i18n-placeholder="settings.placeholderImageSize" /></label>
+          <p class="dialogHint" data-i18n-html="settings.imageHint">接口类型填 <code>local</code> 只走本地 GPU；填 <code>auto</code> 优先可用后端，远程不可用/未配置时回退。本地免费，远程按张计费。</p>
         </section>
         <section>
-          <h3>本地 GPU 出图（直连或 SSH，可选）</h3>
-          <label>连接方式<input name="image.local.mode" placeholder="auto / direct / ssh" /></label>
-          <label>SSH 主机<input name="image.local.host" placeholder="user@host（仅 ssh 模式需要）" /></label>
-          <label>SSH 命令<input name="image.local.sshBin" placeholder="ssh" /></label>
-          <label>SCP 命令<input name="image.local.scpBin" placeholder="scp" /></label>
-          <label>Python 路径<input name="image.local.pythonBin" placeholder="/path/to/python" /></label>
-          <label>脚本路径<input name="image.local.script" placeholder="/path/to/generate.py" /></label>
-          <label>工作目录<input name="image.local.workdir" placeholder="/path/to/workdir" /></label>
-          <label>输出短边<input name="image.local.shortEdge" placeholder="768" /></label>
-          <label>去噪步数<input name="image.local.steps" placeholder="8" /></label>
-          <label>显存模式<input name="image.local.vram" placeholder="offload / auto / cuda" /></label>
-          <label>超时 ms<input name="image.local.timeoutMs" placeholder="900000" /></label>
-          <p class="dialogHint"><code>auto</code> 在本机同时存在脚本与 Python 时直连，否则按 SSH 主机走远端；<code>direct</code> 只在本机 spawn，不经过 SSH/scp。短边 768 = 16:9 输出约 1344×768。</p>
+          <h3 data-i18n="settings.localImageSection">本地 GPU 出图（直连或 SSH，可选）</h3>
+          <label><span data-i18n="settings.connectMode">连接方式</span><input name="image.local.mode" placeholder="auto / direct / ssh" /></label>
+          <label><span data-i18n="settings.sshHost">SSH 主机</span><input name="image.local.host" placeholder="user@host（仅 ssh 模式需要）" data-i18n-placeholder="settings.placeholderSshHost" /></label>
+          <label><span data-i18n="settings.sshBin">SSH 命令</span><input name="image.local.sshBin" placeholder="ssh" /></label>
+          <label><span data-i18n="settings.scpBin">SCP 命令</span><input name="image.local.scpBin" placeholder="scp" /></label>
+          <label><span data-i18n="settings.pythonBin">Python 路径</span><input name="image.local.pythonBin" placeholder="/path/to/python" /></label>
+          <label><span data-i18n="settings.scriptPath">脚本路径</span><input name="image.local.script" placeholder="/path/to/generate.py" /></label>
+          <label><span data-i18n="settings.workdir">工作目录</span><input name="image.local.workdir" placeholder="/path/to/workdir" /></label>
+          <label><span data-i18n="settings.shortEdge">输出短边</span><input name="image.local.shortEdge" placeholder="768" /></label>
+          <label><span data-i18n="settings.steps">去噪步数</span><input name="image.local.steps" placeholder="8" /></label>
+          <label><span data-i18n="settings.vramMode">显存模式</span><input name="image.local.vram" placeholder="offload / auto / cuda" /></label>
+          <label><span data-i18n="settings.timeoutMs">超时 ms</span><input name="image.local.timeoutMs" placeholder="900000" /></label>
+          <p class="dialogHint" data-i18n-html="settings.localImageHint"><code>auto</code> 在本机同时存在脚本与 Python 时直连，否则按 SSH 主机走远端；<code>direct</code> 只在本机 spawn，不经过 SSH/scp。短边 768 = 16:9 输出约 1344×768。</p>
         </section>
         <div class="dialogActions">
-          <button value="cancel" class="ghost">取消</button>
-          <button value="save" id="saveSettings" class="primary">保存</button>
+          <button value="cancel" class="ghost" data-i18n="misc.cancel">取消</button>
+          <button value="save" id="saveSettings" class="primary" data-i18n="misc.save">保存</button>
         </div>
       </form>
     </dialog>

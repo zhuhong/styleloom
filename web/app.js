@@ -1,4 +1,5 @@
 import { renderMarkdown } from "./markdown.js";
+import { applyStatic, getLang, initLang, langLocale, setLang, subscribeLang, t } from "./i18n.js";
 
 const state = {
   projects: [],
@@ -16,6 +17,9 @@ const state = {
   showAllSkills: false,
   pendingUploads: [],
   uploading: 0,
+  /** 右侧「渲染」面板的数据，来自 /jobs/stream */
+  jobs: [],
+  jobsSource: null,
 };
 
 const els = {
@@ -43,27 +47,23 @@ const els = {
   engineState: document.getElementById("engineState"),
 };
 
-const toolLabels = {
-  update_brief: "记录需求",
-  study_reference_video: "学习参考视频",
-  read_style_bible: "读取风格圣经",
-  read_learning_shots: "读取拉片明细",
-  update_style_bible: "修正风格圣经",
-  plan_shots: "写入分镜",
-  build_shot_prompt: "编写 H3 提示词",
-  generate_still: "生成定妆照 / 场景照",
-  generate_shot: "生成视频",
-  resume_shot: "恢复已提交任务",
-  set_shot_references: "绑定参考素材",
-  stitch_shots: "拼接成片",
-  list_assets: "查看素材",
-  list_style_packs: "查看风格包",
-  apply_style_pack: "套用风格包",
-  set_stage: "更新阶段",
-};
+// 工具名可能新增，字典里查不到时回退原始 name，避免显示 "tool.xxx"。
+function labelOr(key, fallback) {
+  const value = t(key);
+  return value === key ? fallback : value;
+}
 
-const stageLabels = { brief: "需求", study: "学习", plan: "分镜", generate: "生成", deliver: "交付" };
-const learningLabels = { none: "未开始", slicing: "切片中", annotating: "逐镜分析中", distilling: "归纳中", done: "已完成", failed: "失败" };
+function toolLabel(name) {
+  return labelOr(`tool.${name}`, name);
+}
+
+function stageLabel(stage) {
+  return labelOr(`stage.${stage}`, stage);
+}
+
+function learningLabel(status) {
+  return labelOr(`learningStatus.${status}`, status);
+}
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, character => ({
@@ -101,7 +101,7 @@ function formatSeconds(value) {
 function formatUpdatedAt(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
-  return date.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleString(langLocale(), { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
 function formatDuration(ms) {
@@ -125,27 +125,25 @@ function formatFileSize(bytes) {
 }
 
 function skillStatusLabel(status) {
-  return status === "active" ? "生效" : status === "candidate" ? "候选" : status === "deprecated" ? "停用" : status;
+  return labelOr(`skillStatus.${status}`, status);
 }
 
 function skillKindLabel(kind) {
-  const labels = { camera: "运镜", lighting: "灯光", color: "色彩", composition: "构图", rhythm: "节奏", prompt: "提示词", sound: "声音", workflow: "流程", avoid: "避坑" };
-  return labels[kind] || kind;
+  return labelOr(`skillKind.${kind}`, kind);
 }
 
 function shotStatusLabel(status) {
-  const labels = { planned: "待生成", promptReady: "提示词就绪", generating: "生成中", done: "已完成", pending: "待恢复", failed: "失败" };
-  return labels[status] || status;
+  return labelOr(`shotStatus.${status}`, status);
 }
 
 function learningStateLabel(learning) {
-  if (learning.status === "done" && learning.warning) return "已完成 · 有提示";
-  return learningLabels[learning.status] || learning.status;
+  if (learning.status === "done" && learning.warning) return t("learning.doneWithWarning");
+  return learningLabel(learning.status);
 }
 
 function readableLearningWarning(warning) {
   if (!warning) return "";
-  if (warning.includes("返回内容不是 JSON")) return "风格归纳使用规则版回退；可重新学习或手动修正风格圣经。";
+  if (warning.includes("返回内容不是 JSON")) return t("learning.fallbackWarning");
   return warning;
 }
 
@@ -182,7 +180,7 @@ function openMedia({ src, type, title, openUrl }) {
   delete els.mediaDialog.dataset.closing;
   resetMediaDialog();
   const kind = type || mediaTypeForPath(src) || "image";
-  const kindLabel = kind === "video" ? "视频" : kind === "audio" ? "音频" : "图片";
+  const kindLabel = kind === "video" ? t("media.video") : kind === "audio" ? t("media.audio") : t("media.image");
   const cleanTitle = String(title || "").replace(/^(frame|video|still|source|clip|audio)\s*·\s*/i, "");
   els.mediaDialogTitle.textContent = cleanTitle ? `${kindLabel} · ${cleanTitle}` : kindLabel;
   els.mediaDialogOpen.href = openUrl || src;
@@ -257,7 +255,7 @@ function attachmentNode(attachment) {
   }
   const name = document.createElement("span");
   name.className = "bubbleAttachmentName";
-  name.textContent = attachment.label || attachment.path.split("/").pop() || "附件";
+  name.textContent = attachment.label || attachment.path.split("/").pop() || t("media.attachment");
   button.append(thumb, name);
   return button;
 }
@@ -282,22 +280,27 @@ function addBubble(role, content, isError = false, attachments = []) {
   scrollToBottom();
 }
 
+/** 长任务（生成视频/恢复）的进度改到右侧「渲染」面板，气泡里只留一行状态。 */
+const panelScopedTools = new Set(["generate_shot", "resume_shot"]);
+
 function addToolCard(event) {
   clearEmptyState();
+  const inPanel = panelScopedTools.has(event.name);
   const card = document.createElement("div");
   card.className = "toolCard";
   card.dataset.id = event.id;
   card.innerHTML = `
     <div class="toolHead">
-      <span class="toolName">${escapeHtml(toolLabels[event.name] || event.name)}</span>
+      <span class="toolName">${escapeHtml(toolLabel(event.name))}</span>
       <span class="muted">${escapeHtml(event.name)}</span>
-      <span class="status">运行中…</span>
+      <span class="status">${escapeHtml(t("tool.running"))}</span>
       <span class="toolDuration"></span>
     </div>
     <div class="toolArgs">${escapeHtml(JSON.stringify(event.args ?? {}).slice(0, 400))}</div>
-    <div class="progress"><i></i></div>
-    <div class="progressLabel">准备中</div>`;
+    ${inPanel ? `<div class="progressLabel panelHint">${escapeHtml(t("plan.panelHint"))}</div>` : `<div class="progress"><i></i></div>
+    <div class="progressLabel">${escapeHtml(t("tool.preparing"))}</div>`}`;
   card.dataset.startedAt = String(performance.now());
+  card.dataset.panel = inPanel ? "1" : "0";
   els.messages.append(card);
   state.toolCards.set(event.id, card);
   scrollToBottom();
@@ -306,6 +309,8 @@ function addToolCard(event) {
 function updateToolProgress(event) {
   const card = state.toolCards.get(event.scope);
   if (!card) return;
+  // 生成类任务的进度已经推到右侧面板，这里不再重复渲染进度条。
+  if (card.dataset.panel === "1") return;
   const bar = card.querySelector(".progress i");
   const label = card.querySelector(".progressLabel");
   if (bar) bar.style.width = `${Math.max(0, Math.min(100, event.percent))}%`;
@@ -318,33 +323,37 @@ function finishToolCard(event) {
   if (!card) return;
   const status = card.querySelector(".status");
   if (status) {
-    status.textContent = event.ok ? "完成" : "失败";
+    status.textContent = event.ok ? t("tool.done") : t("tool.failed");
     status.classList.add(event.ok ? "ok" : "fail");
   }
   const bar = card.querySelector(".progress i");
   if (bar && event.ok) bar.style.width = "100%";
   const label = card.querySelector(".progressLabel");
-  if (label) label.textContent = event.preview.slice(0, 300);
+  if (label) {
+    label.textContent = card.dataset.panel === "1"
+      ? (event.ok ? t("plan.panelDone") : event.preview.slice(0, 200))
+      : event.preview.slice(0, 300);
+  }
   const startedAt = Number(card.dataset.startedAt);
   const fallback = Number.isFinite(startedAt) ? performance.now() - startedAt : 0;
   const elapsed = Number.isFinite(Number(event.elapsedMs)) ? Number(event.elapsedMs) : fallback;
   const duration = card.querySelector(".toolDuration");
   if (duration) {
-    duration.textContent = `耗时 ${formatDuration(elapsed)}`;
-    duration.title = "工具执行耗时";
+    duration.textContent = t("tool.elapsed", { time: formatDuration(elapsed) });
+    duration.title = t("tool.elapsedTitle");
   }
   scrollToBottom();
 }
 
 function renderProjectList() {
   if (!state.projects.length) {
-    els.projectList.innerHTML = '<p class="muted" style="font-size:12px;padding:0 6px">还没有项目</p>';
+    els.projectList.innerHTML = `<p class="muted" style="font-size:12px;padding:0 6px">${escapeHtml(t("nav.noProjects"))}</p>`;
     return;
   }
   els.projectList.innerHTML = state.projects.map(project => `
     <button class="projectItem ${state.project?.id === project.id ? "active" : ""}" data-id="${escapeHtml(project.id)}">
       <strong>${escapeHtml(project.title)}</strong>
-      <span>${escapeHtml(stageLabels[project.stage] || project.stage)} · ${project.shotCount} 镜 · ${escapeHtml(learningLabels[project.learning] || project.learning)}</span>
+      <span>${escapeHtml(t("misc.projectMeta", { stage: stageLabel(project.stage), count: project.shotCount, learning: learningLabel(project.learning) }))}</span>
     </button>`).join("");
   for (const button of els.projectList.querySelectorAll(".projectItem")) {
     button.addEventListener("click", () => selectProject(button.dataset.id));
@@ -353,25 +362,31 @@ function renderProjectList() {
 
 function renderPacks() {
   if (!state.packs.length) {
-    els.packList.innerHTML = '<p class="muted" style="font-size:12px;padding:0 6px">学习参考片后自动生成</p>';
+    els.packList.innerHTML = `<p class="muted" style="font-size:12px;padding:0 6px">${escapeHtml(t("nav.noPacks"))}</p>`;
     return;
   }
   els.packList.innerHTML = state.packs.map(pack => `
-    <div class="packItem" title="对 Agent 说：套用风格包 ${escapeHtml(pack.id)}">
+    <div class="packItem" title="${escapeHtml(t("nav.packHint", { id: pack.id }))}">
       <strong>${escapeHtml(pack.title)}</strong>
       <p>${escapeHtml(pack.summary)}</p>
-      <p>${escapeHtml(pack.characters.join("、") || "无角色")} · ${pack.shotCount} 镜</p>
+      <p>${escapeHtml(pack.characters.join(t("misc.listSeparator")) || t("nav.noCharacters"))} · ${escapeHtml(t("units.shots", { count: pack.shotCount }))}</p>
     </div>`).join("");
+}
+
+// 空状态由 index 与 renderHistory 共用，切换语言时也整体重渲染。
+function renderEmptyState() {
+  els.messages.innerHTML = `<div class="emptyState">
+    <h2>${escapeHtml(t("chat.emptyTitle"))}</h2>
+    <p>${t("chat.emptyExample")}</p>
+    <p>${escapeHtml(t("chat.emptyXhs"))}</p>
+    <p>${escapeHtml(t("chat.emptyFlow"))}</p>
+  </div>`;
 }
 
 function renderHistory(messages) {
   els.messages.innerHTML = "";
   if (!messages.length) {
-    els.messages.innerHTML = `<div class="emptyState">
-      <h2>先给一个参考片，或者直接说想法</h2>
-      <p>例：学习 <code>/Users/you/Movies/reference.mp4</code> 的运镜和光线，做一个 8 秒的雨夜街头镜头。</p>
-      <p>学习流程：ffmpeg 切片 → 视觉模型逐镜头拉片 → 归纳定妆照、场景照、运镜与节奏 → H3 生成。</p>
-    </div>`;
+    renderEmptyState();
     return;
   }
   for (const message of messages) addBubble(message.role, message.content, false, message.attachments || []);
@@ -379,7 +394,7 @@ function renderHistory(messages) {
 
 function renderEntity(project, entity, kind) {
   const images = entity.stillImages || [];
-  const imageLabel = kind === "character" ? "定妆照" : "场景照";
+  const imageLabel = kind === "character" ? t("bible.characterStill") : t("bible.locationStill");
   return `<div class="entity">
     <div class="entityHead"><b>${escapeHtml(entity.name)}</b><span>${escapeHtml(entity.id)}</span></div>
     <p>${escapeHtml(entity.descriptionZh)}</p>
@@ -403,9 +418,9 @@ function renderSkillCard(skill) {
     ${skill.promptFragment ? `<pre>${escapeHtml(skill.promptFragment)}</pre>` : ""}
     ${(skill.images || []).length ? `<div class="thumbs">${skill.images.map(image => {
       const src = skillFileUrl(skill.id, image);
-      return `<a class="mediaThumb" href="${src}" data-media-src="${src}" data-media-type="image" data-media-title="${escapeHtml(skill.name)} · 证据" target="_blank" rel="noreferrer"><img loading="lazy" src="${src}" alt="${escapeHtml(skill.name)}" /></a>`;
+      return `<a class="mediaThumb" href="${src}" data-media-src="${src}" data-media-type="image" data-media-title="${escapeHtml(t("skills.evidenceTitle", { name: skill.name }))}" target="_blank" rel="noreferrer"><img loading="lazy" src="${src}" alt="${escapeHtml(skill.name)}" /></a>`;
     }).join("")}</div>` : ""}
-    <p class="skillStats"><span class="statusDot ${escapeHtml(skill.status)}"></span>${escapeHtml(skillStatusLabel(skill.status))} · 证据 ${skill.evidenceCount} · 使用 ${skill.used} · 好评 ${skill.good} / 一般 ${skill.mixed} / 差评 ${skill.bad}</p>
+    <p class="skillStats"><span class="statusDot ${escapeHtml(skill.status)}"></span>${escapeHtml(skillStatusLabel(skill.status))} · ${escapeHtml(t("skills.stats", { evidence: skill.evidenceCount, used: skill.used, good: skill.good, mixed: skill.mixed, bad: skill.bad }))}</p>
   </details>`;
 }
 
@@ -413,8 +428,8 @@ function renderSkills() {
   const all = state.skills || [];
   if (!all.length) {
     return `<section class="inspectorSection">
-      <div class="sectionHead"><h3>技能库</h3><span class="count">0</span></div>
-      <p class="emptyHint">学习参考片后自动积累；生成后反馈效果会调整置信度。</p>
+      <div class="sectionHead"><h3>${escapeHtml(t("skills.title"))}</h3><span class="count">0</span></div>
+      <p class="emptyHint">${escapeHtml(t("skills.emptyHint"))}</p>
     </section>`;
   }
   const counts = {
@@ -424,10 +439,10 @@ function renderSkills() {
     deprecated: all.filter(skill => skill.status === "deprecated").length,
   };
   const filters = [
-    ["all", "全部", counts.all],
-    ["active", "生效", counts.active],
-    ["candidate", "候选", counts.candidate],
-    ["deprecated", "停用", counts.deprecated],
+    ["all", t("skillStatus.all"), counts.all],
+    ["active", t("skillStatus.active"), counts.active],
+    ["candidate", t("skillStatus.candidate"), counts.candidate],
+    ["deprecated", t("skillStatus.deprecated"), counts.deprecated],
   ].filter(([, , count]) => count > 0);
   const filter = filters.some(([value]) => value === state.skillFilter) ? state.skillFilter : "all";
   const filtered = all
@@ -438,30 +453,30 @@ function renderSkills() {
     });
   const visible = state.showAllSkills ? filtered : filtered.slice(0, 8);
   return `<section class="inspectorSection">
-    <div class="sectionHead"><h3>技能库</h3><span class="count">${filter === "all" ? all.length : `${filtered.length} / ${all.length}`}</span></div>
-    <div class="filterChips">${filters.map(([value, label, count]) => `<button class="filterChip ${filter === value ? "active" : ""}" data-skill-filter="${value}">${label}<span>${count}</span></button>`).join("")}</div>
-    <p class="sectionHint">按 生效 → 候选 排序，置信度 0–1（越高越可信）。</p>
-    ${visible.length ? visible.map(renderSkillCard).join("") : `<p class="emptyHint">没有这个状态的技能。</p>`}
-    ${filtered.length > 8 ? `<button class="textButton" data-show-all-skills>${state.showAllSkills ? "收起" : `显示全部 ${filtered.length} 条`}</button>` : ""}
+    <div class="sectionHead"><h3>${escapeHtml(t("skills.title"))}</h3><span class="count">${filter === "all" ? all.length : `${filtered.length} / ${all.length}`}</span></div>
+    <div class="filterChips">${filters.map(([value, label, count]) => `<button class="filterChip ${filter === value ? "active" : ""}" data-skill-filter="${value}">${escapeHtml(label)}<span>${count}</span></button>`).join("")}</div>
+    <p class="sectionHint">${escapeHtml(t("skills.hint"))}</p>
+    ${visible.length ? visible.map(renderSkillCard).join("") : `<p class="emptyHint">${escapeHtml(t("skills.emptyFilter"))}</p>`}
+    ${filtered.length > 8 ? `<button class="textButton" data-show-all-skills>${escapeHtml(state.showAllSkills ? t("skills.collapse") : t("skills.showAll", { count: filtered.length }))}</button>` : ""}
   </section>`;
 }
 
 function renderOverview(project, shots, bible, brief, learning) {
   const parts = [];
   parts.push(`<section class="inspectorSection">
-    <div class="sectionHead"><h3>需求</h3></div>
+    <div class="sectionHead"><h3>${escapeHtml(t("brief.title"))}</h3></div>
     <div class="briefCard">
-      <p class="briefIdea">${brief.idea ? escapeHtml(brief.idea) : '<span class="muted">还没有记录需求</span>'}</p>
+      <p class="briefIdea">${brief.idea ? escapeHtml(brief.idea) : `<span class="muted">${escapeHtml(t("brief.empty"))}</span>`}</p>
       <div class="metaGrid">
-        <div><b>类型</b><span title="${escapeHtml(brief.genre || "-")}">${escapeHtml(brief.genre || "-")}</span></div>
-        <div><b>画幅</b><span title="${escapeHtml(brief.aspectRatio || "-")}">${escapeHtml(brief.aspectRatio || "-")}</span></div>
-        <div><b>目标时长</b><span title="${brief.durationSeconds ? `${brief.durationSeconds} 秒` : "-"}">${brief.durationSeconds ? `${brief.durationSeconds} 秒` : "-"}</span></div>
+        <div><b>${escapeHtml(t("brief.genre"))}</b><span title="${escapeHtml(brief.genre || "-")}">${escapeHtml(brief.genre || "-")}</span></div>
+        <div><b>${escapeHtml(t("brief.aspectRatio"))}</b><span title="${escapeHtml(brief.aspectRatio || "-")}">${escapeHtml(brief.aspectRatio || "-")}</span></div>
+        <div><b>${escapeHtml(t("brief.duration"))}</b><span title="${brief.durationSeconds ? escapeHtml(t("units.seconds", { value: brief.durationSeconds })) : "-"}">${brief.durationSeconds ? escapeHtml(t("units.seconds", { value: brief.durationSeconds })) : "-"}</span></div>
       </div>
       ${((brief.mustKeep || []).length + (brief.avoid || []).length) ? `<details class="fold">
-        <summary>约束 <span class="count">${(brief.mustKeep || []).length + (brief.avoid || []).length} 条</span></summary>
+        <summary>${escapeHtml(t("brief.constraints"))} <span class="count">${escapeHtml(t("units.items", { count: (brief.mustKeep || []).length + (brief.avoid || []).length }))}</span></summary>
         <div class="chips">
-          ${(brief.mustKeep || []).map(item => `<span class="chip">保留：${escapeHtml(item)}</span>`).join("")}
-          ${(brief.avoid || []).map(item => `<span class="chip">避免：${escapeHtml(item)}</span>`).join("")}
+          ${(brief.mustKeep || []).map(item => `<span class="chip">${escapeHtml(t("brief.keep", { item }))}</span>`).join("")}
+          ${(brief.avoid || []).map(item => `<span class="chip">${escapeHtml(t("brief.avoid", { item }))}</span>`).join("")}
         </div>
       </details>` : ""}
     </div>
@@ -469,26 +484,26 @@ function renderOverview(project, shots, bible, brief, learning) {
 
   const resolution = learning.sourceWidth && learning.sourceHeight ? `${learning.sourceWidth}×${learning.sourceHeight}` : "";
   parts.push(`<section class="inspectorSection">
-    <div class="sectionHead"><h3>学习状态</h3><span class="count">${escapeHtml(learningStateLabel(learning))}</span></div>
+    <div class="sectionHead"><h3>${escapeHtml(t("learning.title"))}</h3><span class="count">${escapeHtml(learningStateLabel(learning))}</span></div>
     ${learning.error ? `<p class="inlineWarning error">${escapeHtml(learning.error)}</p>` : ""}
     ${learning.warning ? `<p class="inlineWarning warn">${escapeHtml(readableLearningWarning(learning.warning))}</p>` : ""}
     <div class="statRow">
-      <span class="stat"><b>${learning.shotCount ?? 0}</b>参考镜头</span>
-      ${learning.sourceDuration ? `<span class="stat"><b>${formatSeconds(learning.sourceDuration)}</b>时长</span>` : ""}
-      ${resolution ? `<span class="stat"><b>${escapeHtml(resolution)}</b>分辨率</span>` : ""}
+      <span class="stat"><b>${learning.shotCount ?? 0}</b>${escapeHtml(t("units.referenceShots"))}</span>
+      ${learning.sourceDuration ? `<span class="stat"><b>${formatSeconds(learning.sourceDuration)}</b>${escapeHtml(t("units.duration"))}</span>` : ""}
+      ${resolution ? `<span class="stat"><b>${escapeHtml(resolution)}</b>${escapeHtml(t("units.resolution"))}</span>` : ""}
     </div>
     ${shots.length ? `<details class="fold">
-      <summary>参考镜头 <span class="count">${shots.length} 个</span></summary>
+      <summary>${escapeHtml(t("learning.referenceShots"))} <span class="count">${escapeHtml(t("units.count", { count: shots.length }))}</span></summary>
       <div class="shotGrid">${shots.map(shot => `
         <div class="shotCard">
-          <a class="mediaThumb" href="${fileUrl(project.id, shot.keyframe)}" data-media-src="${fileUrl(project.id, shot.keyframe)}" data-media-type="image" data-media-title="${escapeHtml(shot.id)} 关键帧" target="_blank" rel="noreferrer"><img loading="lazy" src="${fileUrl(project.id, shot.keyframe)}" alt="${escapeHtml(shot.id)}" /></a>
+          <a class="mediaThumb" href="${fileUrl(project.id, shot.keyframe)}" data-media-src="${fileUrl(project.id, shot.keyframe)}" data-media-type="image" data-media-title="${escapeHtml(t("learning.keyframeTitle", { id: shot.id }))}" target="_blank" rel="noreferrer"><img loading="lazy" src="${fileUrl(project.id, shot.keyframe)}" alt="${escapeHtml(shot.id)}" /></a>
           <div class="shotMeta"><strong>${escapeHtml(shot.id)} · ${formatSeconds(shot.duration)}</strong>${escapeHtml(shot.shotSize || "-")} · ${escapeHtml((shot.movement || "").slice(0, 42))}</div>
         </div>`).join("")}</div>
-    </details>` : `<p class="emptyHint">还没有参考镜头。</p>`}
+    </details>` : `<p class="emptyHint">${escapeHtml(t("learning.noShots"))}</p>`}
   </section>`);
 
   if (!bible) {
-    parts.push(`<p class="emptyHint">还没有风格圣经。学习参考片后会自动生成角色、场景与运镜。</p>`);
+    parts.push(`<p class="emptyHint">${escapeHtml(t("bible.empty"))}</p>`);
     return parts.join("");
   }
 
@@ -496,24 +511,24 @@ function renderOverview(project, shots, bible, brief, learning) {
   const locations = bible.locations || [];
   const moves = bible.cameraGrammar || [];
   parts.push(`<section class="inspectorSection">
-    <div class="sectionHead"><h3>风格圣经</h3><span class="count">${escapeHtml(bible.rhythm?.averageShotSeconds ?? "-")}s/镜</span></div>
+    <div class="sectionHead"><h3>${escapeHtml(t("bible.title"))}</h3><span class="count">${escapeHtml(t("bible.perShot", { value: bible.rhythm?.averageShotSeconds ?? "-" }))}</span></div>
     <div class="bibleCard">
       <p class="bibleSummary">${escapeHtml(bible.summary)}</p>
       <div class="chips">
-        ${characters.map(character => `<span class="chip">角色 · ${escapeHtml(character.name)}</span>`).join("")}
-        ${locations.map(location => `<span class="chip">场景 · ${escapeHtml(location.name)}</span>`).join("")}
+        ${characters.map(character => `<span class="chip">${escapeHtml(t("bible.characterChip", { name: character.name }))}</span>`).join("")}
+        ${locations.map(location => `<span class="chip">${escapeHtml(t("bible.locationChip", { name: location.name }))}</span>`).join("")}
       </div>
       ${characters.length || locations.length ? `<details class="fold">
-        <summary>角色与场景 <span class="count">${characters.length + locations.length} 项</span></summary>
+        <summary>${escapeHtml(t("bible.charactersLocations"))} <span class="count">${escapeHtml(t("units.entries", { count: characters.length + locations.length }))}</span></summary>
         ${characters.map(character => renderEntity(project, character, "character")).join("")}
         ${locations.map(location => renderEntity(project, location, "location")).join("")}
       </details>` : ""}
       ${moves.length ? `<details class="fold">
-        <summary>运镜语法 <span class="count">${moves.length} 条</span></summary>
+        <summary>${escapeHtml(t("bible.cameraGrammar"))} <span class="count">${escapeHtml(t("units.items", { count: moves.length }))}</span></summary>
         <ul class="cameraList">${moves.map(move => `<li><b>${escapeHtml(move.name)}</b><span>${escapeHtml(move.descriptionZh || move.promptFragment || "")}</span></li>`).join("")}</ul>
       </details>` : ""}
       ${bible.style?.stylePrefix ? `<details class="fold">
-        <summary>风格前缀</summary>
+        <summary>${escapeHtml(t("bible.stylePrefix"))}</summary>
         <p class="stylePrefix">${escapeHtml(bible.style.stylePrefix)}</p>
       </details>` : ""}
     </div>
@@ -521,17 +536,68 @@ function renderOverview(project, shots, bible, brief, learning) {
   return parts.join("");
 }
 
+function formatElapsed(iso) {
+  const started = Date.parse(iso || "");
+  if (!Number.isFinite(started)) return "";
+  const seconds = Math.max(0, Math.round((Date.now() - started) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m${String(seconds % 60).padStart(2, "0")}s`;
+  return `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, "0")}m`;
+}
+
+const jobStatusLabel = status => labelOr(`jobs.status.${status}`, status);
+
+function renderJobs(project) {
+  const jobs = state.jobs || [];
+  const active = jobs.filter(job => job.status === "running").length;
+  const countLabel = active
+    ? t("jobs.active", { count: active })
+    : jobs.length ? t("jobs.count", { count: jobs.length }) : t("jobs.empty");
+  const header = `<section class="inspectorSection">
+    <div class="sectionHead"><h3>${escapeHtml(t("jobs.title"))}</h3><span class="count">${escapeHtml(countLabel)}</span></div>
+    <p class="sectionHint">${escapeHtml(t("jobs.hint"))}</p>`;
+
+  if (!jobs.length) {
+    return `${header}<p class="emptyHint">${escapeHtml(t("jobs.emptyHint"))}</p></section>`;
+  }
+
+  return `${header}
+    ${jobs.map(job => {
+      const percent = Math.max(0, Math.min(100, Math.round(job.percent || 0)));
+      const status = job.status;
+      const videoUrl = job.video ? fileUrl(project.id, job.video) : "";
+      const canResume = status === "pending" && job.videoId;
+      return `<div class="jobCard ${escapeHtml(status)}">
+        <div class="jobHead">
+          <b>${escapeHtml(job.shotId)}</b>
+          <span class="state ${escapeHtml(status)}">${escapeHtml(jobStatusLabel(status))}</span>
+          <span class="jobElapsed">${escapeHtml(formatElapsed(job.startedAt))}</span>
+        </div>
+        <div class="progress"><i style="width:${percent}%"></i></div>
+        <div class="jobLabel">${percent}% · ${escapeHtml(job.label || "")}</div>
+        ${job.videoId ? `<div class="jobMeta">video_id ${escapeHtml(job.videoId)}</div>` : ""}
+        ${job.error ? `<p class="inlineWarning error">${escapeHtml(job.error)}</p>` : ""}
+        <div class="jobActions">
+          ${videoUrl ? `<button class="textButton" type="button" data-media-src="${videoUrl}" data-media-type="video" data-media-title="${escapeHtml(job.shotId)}" data-media-open="${videoUrl}">${escapeHtml(t("jobs.play"))}</button>` : ""}
+          ${canResume ? `<button class="textButton" type="button" data-resume-shot="${escapeHtml(job.shotId)}">${escapeHtml(t("jobs.resume"))}</button>` : ""}
+        </div>
+      </div>`;
+    }).join("")}
+  </section>`;
+}
+
 function renderPlan(project) {
   const plan = project.plan || [];
   if (!plan.length) {
     return `<section class="inspectorSection">
-      <div class="sectionHead"><h3>分镜</h3><span class="count">0</span></div>
-      <p class="emptyHint">还没有分镜。先在左侧对话里描述想法，让 Agent 规划镜头。</p>
+      <div class="sectionHead"><h3>${escapeHtml(t("plan.title"))}</h3><span class="count">0</span></div>
+      <p class="emptyHint">${escapeHtml(t("plan.empty"))}</p>
     </section>`;
   }
   return `<section class="inspectorSection">
-    <div class="sectionHead"><h3>分镜</h3></div>
-    <p class="sectionHint">点击视频封面，在弹窗里播放。</p>
+    <div class="sectionHead"><h3>${escapeHtml(t("plan.title"))}</h3></div>
+    <p class="sectionHint">${escapeHtml(t("plan.hint"))}</p>
     ${plan.map(shot => {
       const videoUrl = shot.video ? fileUrl(project.id, shot.video) : "";
       const preview = shot.video
@@ -541,14 +607,14 @@ function renderPlan(project) {
       return `<div class="planRow">
         <div class="planBody">
           <div class="planMiniMedia">
-            ${shot.video ? `<button class="videoPoster mini" type="button" data-media-src="${videoUrl}" data-media-type="video" data-media-title="${escapeHtml(`${shot.id} ${shot.title}`)}" data-media-open="${videoUrl}" aria-label="弹窗预览 ${escapeHtml(shot.id)}"><video muted preload="metadata" playsinline ${posterUrl ? `poster="${posterUrl}"` : ""} src="${videoUrl}"></video><span class="playBadge"><span>▶</span></span></button>` : `<div class="planPlaceholder mini">${shot.status === "generating" ? "生成中…" : "未生成"}</div>`}
+            ${shot.video ? `<button class="videoPoster mini" type="button" data-media-src="${videoUrl}" data-media-type="video" data-media-title="${escapeHtml(`${shot.id} ${shot.title}`)}" data-media-open="${videoUrl}" aria-label="${escapeHtml(t("plan.previewAria", { id: shot.id }))}"><video muted preload="metadata" playsinline ${posterUrl ? `poster="${posterUrl}"` : ""} src="${videoUrl}"></video><span class="playBadge"><span>▶</span></span></button>` : `<div class="planPlaceholder mini">${escapeHtml(shot.status === "generating" ? t("plan.generating") : t("plan.notGenerated"))}</div>`}
           </div>
           <div class="planInfo">
-            <div class="planHead"><b>${escapeHtml(shot.id)}</b><span class="muted">${formatSeconds(shot.durationSeconds)}</span>${shot.durationSeconds < 4 ? `<span class="shortBadge" title="低于 H3 常规下限 4 秒；默认 4 秒生成后裁剪">短镜头</span>` : ""}<span class="state ${escapeHtml(shot.status)}">${escapeHtml(shotStatusLabel(shot.status))}</span></div>
+            <div class="planHead"><b>${escapeHtml(shot.id)}</b><span class="muted">${formatSeconds(shot.durationSeconds)}</span>${shot.durationSeconds < 4 ? `<span class="shortBadge" title="${escapeHtml(t("plan.shortBadgeTitle"))}">${escapeHtml(t("plan.shortBadge"))}</span>` : ""}<span class="state ${escapeHtml(shot.status)}">${escapeHtml(shotStatusLabel(shot.status))}</span></div>
             <p class="planAction"><b>${escapeHtml(shot.title)}</b></p>
-            ${shot.action ? `<details class="fold planDetails"><summary>镜头描述</summary><p>${escapeHtml(shot.action)}</p></details>` : ""}
+            ${shot.action ? `<details class="fold planDetails"><summary>${escapeHtml(t("plan.action"))}</summary><p>${escapeHtml(shot.action)}</p></details>` : ""}
             ${shot.error ? `<p class="inlineWarning error">${escapeHtml(shot.error)}</p>` : ""}
-            ${shot.prompt ? `<details><summary>H3 提示词 · ${escapeHtml(shot.promptMode || "")}</summary><pre>${escapeHtml(shot.prompt)}</pre></details>` : ""}
+            ${shot.prompt ? `<details><summary>${escapeHtml(t("plan.prompt", { mode: shot.promptMode || "" }))}</summary><pre>${escapeHtml(shot.prompt)}</pre></details>` : ""}
           </div>
         </div>
       </div>`;
@@ -561,19 +627,19 @@ function renderAssets(project) {
   const counts = { all: items.length, video: 0, image: 0, audio: 0, other: 0 };
   for (const item of items) counts[item.type] += 1;
   const filters = [
-    ["all", "全部", counts.all],
-    ["video", "视频", counts.video],
-    ["image", "图片", counts.image],
-    ["audio", "音频", counts.audio],
-    ["other", "其他", counts.other],
+    ["all", t("assets.all"), counts.all],
+    ["video", t("media.video"), counts.video],
+    ["image", t("media.image"), counts.image],
+    ["audio", t("media.audio"), counts.audio],
+    ["other", t("assets.other"), counts.other],
   ].filter(([, , count]) => count > 0);
   const filter = filters.some(([value]) => value === state.assetFilter) ? state.assetFilter : "all";
   const filtered = filter === "all" ? items : items.filter(item => item.type === filter);
   const visible = filtered.slice(0, 24);
-  const typeLabels = { video: "视频", image: "图片", audio: "音频", other: "文件" };
+  const typeLabels = { video: t("media.video"), image: t("media.image"), audio: t("media.audio"), other: t("assets.file") };
   return `<section class="inspectorSection">
-    <div class="sectionHead"><h3>素材</h3><span class="count">${filter === "all" ? items.length : `${filtered.length} / ${items.length}`}</span></div>
-    <div class="filterChips">${filters.map(([value, label, count]) => `<button class="filterChip ${filter === value ? "active" : ""}" data-asset-filter="${value}">${label}<span>${count}</span></button>`).join("")}</div>
+    <div class="sectionHead"><h3>${escapeHtml(t("assets.title"))}</h3><span class="count">${filter === "all" ? items.length : `${filtered.length} / ${items.length}`}</span></div>
+    <div class="filterChips">${filters.map(([value, label, count]) => `<button class="filterChip ${filter === value ? "active" : ""}" data-asset-filter="${value}">${escapeHtml(label)}<span>${count}</span></button>`).join("")}</div>
     ${visible.length ? `<div class="assetGrid">${visible.map(({ asset, type }) => {
       const src = fileUrl(project.id, asset.path);
       const title = asset.label;
@@ -583,26 +649,28 @@ function renderAssets(project) {
         : type === "video"
           ? `<video muted preload="metadata" playsinline src="${src}"></video><span class="assetPlay">▶</span>`
           : `<span class="assetAudio">♪</span>`;
-      return `<button class="assetCard" type="button" title="${escapeHtml(title)}" data-media-src="${src}" data-media-type="${type}" data-media-title="${escapeHtml(title)}" data-media-open="${src}"><span class="assetThumb">${thumb}</span><span class="assetLabel"><b>${typeLabels[type]}</b>${escapeHtml(asset.label)}</span></button>`;
-    }).join("")}</div>` : `<p class="emptyHint">${filter === "all" ? "还没有素材。" : "没有这类素材。"}</p>`}
-    ${filtered.length > visible.length ? `<p class="sectionHint">显示最近 ${visible.length} 个，共 ${filtered.length} 个。</p>` : ""}
+      return `<button class="assetCard" type="button" title="${escapeHtml(title)}" data-media-src="${src}" data-media-type="${type}" data-media-title="${escapeHtml(title)}" data-media-open="${src}"><span class="assetThumb">${thumb}</span><span class="assetLabel"><b>${escapeHtml(typeLabels[type])}</b>${escapeHtml(asset.label)}</span></button>`;
+    }).join("")}</div>` : `<p class="emptyHint">${escapeHtml(filter === "all" ? t("assets.empty") : t("assets.emptyFilter"))}</p>`}
+    ${filtered.length > visible.length ? `<p class="sectionHint">${escapeHtml(t("assets.showing", { visible: visible.length, total: filtered.length }))}</p>` : ""}
   </section>`;
 }
 
 function renderInspector(project = state.project, shots = state.shots) {
   if (!project) {
-    els.inspector.innerHTML = '<div class="emptyState small"><p>选择或新建项目后，这里显示学习成果、分镜与素材。</p></div>';
+    els.inspector.innerHTML = `<div class="emptyState small"><p>${escapeHtml(t("inspector.emptyProject"))}</p></div>`;
     return;
   }
   const planCount = (project.plan || []).length;
   const assetCount = (project.assets || []).length;
   const skillCount = (state.skills || []).length;
   const requested = state.inspectorTab;
+  const runningJobs = (state.jobs || []).filter(job => job.status === "running" || job.status === "pending").length;
   const tabs = [
-    ["overview", "概览", 0],
-    ["shots", "分镜", planCount],
-    ["assets", "素材", assetCount],
-    ["skills", "技能", skillCount],
+    ["overview", t("inspector.tabOverview"), 0],
+    ["shots", t("inspector.tabShots"), planCount],
+    ["jobs", t("inspector.tabJobs"), runningJobs],
+    ["assets", t("inspector.tabAssets"), assetCount],
+    ["skills", t("inspector.tabSkills"), skillCount],
   ];
   const tab = tabs.some(([id]) => id === requested) ? requested : (planCount ? "shots" : "overview");
   const bible = project.styleBible;
@@ -611,6 +679,7 @@ function renderInspector(project = state.project, shots = state.shots) {
   let content = "";
   if (tab === "overview") content = renderOverview(project, shots, bible, brief, learning);
   else if (tab === "shots") content = renderPlan(project);
+  else if (tab === "jobs") content = renderJobs(project);
   else if (tab === "assets") content = renderAssets(project);
   else content = renderSkills();
 
@@ -618,11 +687,11 @@ function renderInspector(project = state.project, shots = state.shots) {
     <div class="inspectorTitleRow">
       <div class="inspectorTitleText">
         <h2>${escapeHtml(project.title)}</h2>
-        <p>最后更新 ${escapeHtml(formatUpdatedAt(project.updatedAt))}</p>
+        <p>${escapeHtml(t("inspector.updatedAt", { time: formatUpdatedAt(project.updatedAt) }))}</p>
       </div>
-      <span class="stageBadge">${escapeHtml(stageLabels[project.stage] || project.stage)}</span>
+      <span class="stageBadge">${escapeHtml(stageLabel(project.stage))}</span>
     </div>
-    <nav class="inspectorTabs" role="tablist">${tabs.map(([id, label, count]) => `<button class="inspectorTab ${tab === id ? "active" : ""}" data-inspector-tab="${id}" role="tab" aria-selected="${tab === id}">${label}${count ? `<span>${count}</span>` : ""}</button>`).join("")}</nav>
+    <nav class="inspectorTabs" role="tablist">${tabs.map(([id, label, count]) => `<button class="inspectorTab ${tab === id ? "active" : ""}" data-inspector-tab="${id}" role="tab" aria-selected="${tab === id}">${escapeHtml(label)}${count ? `<span>${count}</span>` : ""}</button>`).join("")}</nav>
   </header>
   <div class="inspectorContent">${content}</div>`;
 }
@@ -653,6 +722,47 @@ async function refreshDetail() {
   renderProjectList();
 }
 
+/** 订阅渲染进度；切换项目时先断开旧的。 */
+function connectJobs(projectId) {
+  if (state.jobsSource) {
+    state.jobsSource.close();
+    state.jobsSource = null;
+  }
+  state.jobs = [];
+  if (!projectId) return;
+  const source = new EventSource(`/api/projects/${encodeURIComponent(projectId)}/jobs/stream`);
+  state.jobsSource = source;
+  source.onmessage = event => {
+    let payload;
+    try {
+      payload = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+    if (payload.type === "snapshot") {
+      state.jobs = payload.jobs || [];
+      renderInspector();
+      return;
+    }
+    if (payload.type === "job") {
+      const job = payload.job;
+      const index = state.jobs.findIndex(item => item.id === job.id);
+      if (index >= 0) state.jobs[index] = job;
+      else state.jobs.unshift(job);
+      renderInspector();
+      // 任务结束（成功或需要恢复）时刷新项目，让分镜与素材同步。
+      if (job.status === "done" || job.status === "pending" || job.status === "failed") {
+        scheduleRefresh();
+      }
+    }
+  };
+  source.onerror = () => {
+    // EventSource 会自己重连；这里只清掉连接状态避免叠加。
+    source.close();
+    if (state.jobsSource === source) state.jobsSource = null;
+  };
+}
+
 function scheduleRefresh() {
   clearTimeout(state.refreshTimer);
   state.refreshTimer = setTimeout(() => {
@@ -675,17 +785,18 @@ async function selectProject(id) {
     state.shots = data.shots || [];
     state.toolCards.clear();
     renderHistory(data.messages || []);
+    connectJobs(id);
     renderInspector();
     renderProjectList();
   } catch (error) {
-    addBubble("assistant", `打开项目失败：${error.message}`, true);
+    addBubble("assistant", t("errors.openProject", { message: error.message }), true);
   }
 }
 
 function updateComposerState() {
   const busy = state.streaming || state.uploading > 0;
   els.sendButton.disabled = busy;
-  els.sendButton.textContent = state.streaming ? "生成中…" : state.uploading > 0 ? "上传中…" : "发送";
+  els.sendButton.textContent = state.streaming ? t("composer.generating") : state.uploading > 0 ? t("composer.uploading") : t("composer.send");
   els.attachButton.disabled = busy;
 }
 
@@ -703,7 +814,7 @@ function renderPendingUploads() {
   els.pendingUploads.hidden = false;
   els.pendingUploads.innerHTML = state.pendingUploads.map((item, index) => {
     const label = item.asset?.label || item.file.name;
-    const meta = item.status === "uploading" ? "上传中…" : item.status === "error" ? (item.error || "上传失败") : formatFileSize(item.size ?? item.file.size);
+    const meta = item.status === "uploading" ? t("misc.uploading") : item.status === "error" ? (item.error || t("errors.uploadFailedShort")) : formatFileSize(item.size ?? item.file.size);
     const thumb = item.kind === "video"
       ? '<span class="uploadVideoIcon">▶</span>'
       : `<img src="${escapeHtml(item.previewUrl || "")}" alt="" />`;
@@ -714,7 +825,7 @@ function renderPendingUploads() {
       <span class="uploadThumb"${media}>${thumb}</span>
       <span class="uploadName">${escapeHtml(label)}</span>
       <span class="uploadMeta">${escapeHtml(meta)}</span>
-      <button type="button" data-remove-upload="${index}" aria-label="移除 ${escapeHtml(label)}">×</button>
+      <button type="button" data-remove-upload="${index}" aria-label="${escapeHtml(t("misc.removeUpload", { label }))}">×</button>
     </div>`;
   }).join("");
 }
@@ -743,16 +854,16 @@ function isUploadableFile(file) {
 
 async function uploadFiles(fileList) {
   if (!state.project) {
-    addBubble("assistant", "请先新建或选择一个项目，再上传素材。", true);
+    addBubble("assistant", t("errors.needProjectForUpload"), true);
     return;
   }
   const files = [...fileList].filter(isUploadableFile);
   if (!files.length) {
-    addBubble("assistant", "只支持上传图片或视频。", true);
+    addBubble("assistant", t("errors.onlyMedia"), true);
     return;
   }
   if (state.pendingUploads.length + files.length > 6) {
-    addBubble("assistant", "一次最多上传 6 个素材。", true);
+    addBubble("assistant", t("errors.tooManyUploads", { max: 6 }), true);
     return;
   }
   const entries = files.map(file => ({
@@ -777,7 +888,7 @@ async function uploadFiles(fileList) {
       const asset = assets[index];
       if (!asset) {
         entry.status = "error";
-        entry.error = "服务端未返回素材";
+        entry.error = t("errors.noAssetReturned");
         continue;
       }
       entry.asset = asset;
@@ -794,7 +905,7 @@ async function uploadFiles(fileList) {
       entry.status = "error";
       entry.error = error.message;
     }
-    addBubble("assistant", `上传失败：${error.message}`, true);
+    addBubble("assistant", t("errors.uploadFailed", { message: error.message }), true);
   } finally {
     state.uploading = Math.max(0, state.uploading - entries.length);
     els.fileInput.value = "";
@@ -805,7 +916,7 @@ async function uploadFiles(fileList) {
 
 async function sendMessage(message, attachments = []) {
   if (!state.project) {
-    addBubble("assistant", "请先新建或选择一个项目。", true);
+    addBubble("assistant", t("errors.needProject"), true);
     return;
   }
   setStreaming(true);
@@ -844,10 +955,37 @@ async function sendMessage(message, attachments = []) {
       }
     }
   } catch (error) {
-    addBubble("assistant", `请求失败：${error.message}`, true);
+    addBubble("assistant", t("errors.requestFailed", { message: error.message }), true);
   } finally {
     setStreaming(false);
     scheduleRefresh();
+  }
+}
+
+/** 从渲染面板直接接回 pending 任务，不用再走一轮对话。 */
+async function resumeShotFromPanel(shotId, button) {
+  if (!state.project || !shotId) return;
+  if (button) {
+    button.disabled = true;
+    button.textContent = t("jobs.resuming");
+  }
+  try {
+    const result = await api(`/api/projects/${encodeURIComponent(state.project.id)}/jobs`, {
+      method: "POST",
+      body: JSON.stringify({ shotId, action: "resume" }),
+    });
+    if (result?.job) {
+      const index = state.jobs.findIndex(item => item.id === result.job.id);
+      if (index >= 0) state.jobs[index] = result.job;
+      else state.jobs.unshift(result.job);
+      renderInspector();
+    }
+  } catch (error) {
+    addBubble("assistant", t("errors.resumeFailed", { message: error.message }), true);
+    if (button) {
+      button.disabled = false;
+      button.textContent = t("jobs.resume");
+    }
   }
 }
 
@@ -867,7 +1005,7 @@ function handleEvent(event) {
     renderProjectList();
     scheduleRefresh();
   } else if (event.type === "error") {
-    addBubble("assistant", `出错了：${event.message}`, true);
+    addBubble("assistant", t("errors.generic", { message: event.message }), true);
   }
 }
 
@@ -877,10 +1015,10 @@ function renderEngineState() {
   const flags = [
     settings.llm?.model ? "LLM" : null,
     settings.llm?.visionModel ? "VLM" : null,
-    settings.video?.provider === "local" ? "本地H3" : settings.video?.apiKey ? "H3" : null,
-    settings.image?.model || settings.image?.local?.mode === "direct" || settings.image?.local?.host ? "图片" : null,
+    settings.video?.provider === "local" ? t("app.engineLocalH3") : settings.video?.apiKey ? "H3" : null,
+    settings.image?.model || settings.image?.local?.mode === "direct" || settings.image?.local?.host ? t("app.engineImage") : null,
   ].filter(Boolean);
-  els.engineState.textContent = flags.length ? `已配置：${flags.join(" · ")}` : "尚未配置模型";
+  els.engineState.textContent = flags.length ? t("app.engineConfigured", { flags: flags.join(" · ") }) : t("app.engineNotConfigured");
   els.engineState.className = `engineState ${flags.length >= 3 ? "ok" : "warn"}`;
 }
 
@@ -973,7 +1111,7 @@ els.messages.addEventListener("click", event => {
 });
 
 els.newProjectButton.addEventListener("click", async () => {
-  const title = window.prompt("项目名称", "我的视频项目");
+  const title = window.prompt(t("misc.newProjectPromptTitle"), t("misc.newProjectDefaultTitle"));
   if (title === null) return;
   try {
     const data = await api("/api/projects", { method: "POST", body: JSON.stringify({ title }) });
@@ -981,7 +1119,7 @@ els.newProjectButton.addEventListener("click", async () => {
     await selectProject(data.project.id);
     els.input.focus();
   } catch (error) {
-    addBubble("assistant", `创建项目失败：${error.message}`, true);
+    addBubble("assistant", t("errors.createProject", { message: error.message }), true);
   }
 });
 
@@ -989,7 +1127,7 @@ els.settingsButton.addEventListener("click", async () => {
   try {
     await loadSettings();
   } catch (error) {
-    addBubble("assistant", `读取设置失败：${error.message}`, true);
+    addBubble("assistant", t("errors.loadSettings", { message: error.message }), true);
     return;
   }
   const settings = state.settings;
@@ -1041,6 +1179,11 @@ els.inspector.addEventListener("click", event => {
     renderInspector();
     return;
   }
+  const resumeButton = event.target.closest("[data-resume-shot]");
+  if (resumeButton) {
+    resumeShotFromPanel(resumeButton.dataset.resumeShot, resumeButton);
+    return;
+  }
   const trigger = event.target.closest("[data-media-src]");
   if (!trigger || !els.inspector.contains(trigger)) return;
   event.preventDefault();
@@ -1069,13 +1212,47 @@ els.settingsForm.addEventListener("submit", async event => {
     renderEngineState();
     els.settingsDialog.close();
   } catch (error) {
-    addBubble("assistant", `保存设置失败：${error.message}`, true);
+    addBubble("assistant", t("errors.saveSettings", { message: error.message }), true);
   }
 });
 
-updateComposerState();
+const langSwitch = document.querySelector(".langSwitch");
+
+function syncLangSwitch() {
+  if (!langSwitch) return;
+  for (const button of langSwitch.querySelectorAll("[data-lang]")) {
+    const active = button.dataset.lang === getLang();
+    button.setAttribute("aria-pressed", String(active));
+    button.classList.toggle("active", active);
+  }
+}
+
+// 语言变化后：静态文案 + 所有动态渲染区域一起刷新。
+function refreshUiLanguage() {
+  applyStatic();
+  syncLangSwitch();
+  renderEngineState();
+  updateComposerState();
+  renderPendingUploads();
+  renderProjectList();
+  renderPacks();
+  renderInspector();
+  if (els.messages.querySelector(".emptyState") && !els.messages.querySelector(".bubble")) renderEmptyState();
+}
+
+subscribeLang(refreshUiLanguage);
+
+langSwitch?.addEventListener("click", event => {
+  const button = event.target.closest("[data-lang]");
+  if (button) setLang(button.dataset.lang);
+});
 
 (async function boot() {
+  initLang();
+  applyStatic();
+  syncLangSwitch();
+  updateComposerState();
+  renderEmptyState();
   try {
     await Promise.all([loadSettings(), loadPacks(), loadSkills(), loadProjects()]);
     if (state.projects.length) {
@@ -1084,6 +1261,6 @@ updateComposerState();
       renderInspector();
     }
   } catch (error) {
-    addBubble("assistant", `初始化失败：${error.message}`, true);
+    addBubble("assistant", t("errors.init", { message: error.message }), true);
   }
 })();

@@ -81,7 +81,7 @@ Everything else — data layout, persistent service, LAN access, reverse proxy, 
 2. **It studies** — slice → per-shot annotation → style bible → skill extraction, with progress streamed to the page. Review the result and ask for corrections.
 3. **Stills** — `generate_still` for character / location references.
 4. **Plan and preview** — `plan_shots`, then `build_shot_prompt`. Both free.
-5. **Render** — `generate_shot(confirmed=true)` only after you have seen and approved the plan.
+5. **Render** — `generate_shot(confirmed=true)` only after you have seen and approved the plan. Rendering runs as a background job: the chat returns immediately and progress streams into the **Render** tab on the right, so closing the page no longer cancels the render.
 6. **Give feedback** — say "that shot is good / meh / bad"; skill confidence updates and compounds across projects.
 
 ## How it works
@@ -93,7 +93,7 @@ Everything else — data layout, persistent service, LAN access, reverse proxy, 
 | Distillation | `learn/distill.ts` | Compress annotations into the style bible + reusable pack |
 | Skills | `learn/skills.ts` | 3–8 candidate skills per study, merged by similarity, scored by evidence |
 | Prompting | `generate/prompt.ts` | Picks T2VA / I2VA / FL2VA / L2VA / Ref2VA, then builds and validates the official H3 structure |
-| Rendering | `providers/video/` | icompify or a self-hosted gateway |
+| Rendering | `providers/video/`, `generate/jobs.ts` | icompify or a self-hosted gateway; runs as a detached background job |
 | Assembly | `generate/stitch.ts` | Normalize every clip, then hard-cut or crossfade into a final asset |
 
 The agent is a thin scheduler over these; each stage is an independent function you can run on its own. Details, data contracts and design rationale: **[ARCHITECTURE.md](ARCHITECTURE.md)**.
