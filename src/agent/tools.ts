@@ -8,7 +8,7 @@ import { copyInto, ensureDir, exists, nowIso, safeJoin } from "../util/fs";
 import { addAsset, getManifest, projectDir } from "../store/projects";
 import { applyStylePack, listStylePacks } from "../store/library";
 import { studyReferenceVideo } from "../learn/study";
-import { generateShot } from "../generate/shot";
+import { generateShot, resumeShot } from "../generate/shot";
 import { generateStill } from "../generate/still";
 import { stitchShots } from "../generate/stitch";
 import { H3_SAFE_MIN_SECONDS, normalizeShotDuration } from "../util/duration";
@@ -362,8 +362,21 @@ export const toolSpecs: ToolSpec[] = [
         durationSeconds: { type: "number", description: "可选，覆盖分镜时长；1-15 秒整数" },
         experimentalDuration: { type: "boolean", description: "低于 4 秒时是否直接请求 H3；默认 false，按 4 秒生成后裁剪" },
         skillIds: { type: "array", items: { type: "string" }, description: "本次实际采用的技能 id，用于统计效果" },
+        force: { type: "boolean", description: "该镜头已有未完成任务时仍要新建（会二次计费）；默认 false，应先试 resume_shot" },
       },
       required: ["shotId", "confirmed"],
+    },
+  },
+  {
+    name: "resume_shot",
+    description: "接回一个已提交但本地放弃等待的 H3 任务（不重新生成、不重复计费）。probeOnly=true 只查一次平台状态。用于 resume 排队超时或服务重启后遗留的任务。",
+    parameters: {
+      type: "object",
+      properties: {
+        shotId: { type: "string" },
+        probeOnly: { type: "boolean", description: "只查询平台状态并回报，不下载、不等待" },
+      },
+      required: ["shotId"],
     },
   },
   {
@@ -712,6 +725,15 @@ async function generateShotTool(ctx: ToolContext, args: Args) {
     return { ok: false, error: "生成视频会产生费用。请先向用户展示分镜和提示词，取得明确同意后，再以 confirmed=true 调用。" };
   }
   const shot = ctx.project.plan.find(item => item.id === shotId);
+  // 已有提交过但未完成的任务：直接新建会二次计费，先让调用方明确处理。
+  if (shot?.videoId && shot.status !== "done" && args.force !== true) {
+    return {
+      ok: false,
+      error: `镜头 ${shotId} 已有未完成任务 ${shot.videoId}（状态 ${shot.status}）。重新生成会二次计费，请先用 resume_shot 恢复；确实要丢弃旧任务并重做时才传 force=true。`,
+      videoId: shot.videoId,
+      status: shot.status,
+    };
+  }
   const result = await generateShot({
     project: ctx.project,
     settings: ctx.settings,
@@ -722,6 +744,19 @@ async function generateShotTool(ctx: ToolContext, args: Args) {
     skillIds: args.skillIds === undefined ? shot?.skillIds : stringArray(args, "skillIds"),
     signal: ctx.signal,
     onProgress: (percent, label) => ctx.emit({ type: "progress", scope: "generate_shot", percent, label }),
+  });
+  ctx.emit({ type: "state", project: ctx.project });
+  return { ok: true, ...result };
+}
+
+async function resumeShotTool(ctx: ToolContext, args: Args) {
+  const result = await resumeShot({
+    project: ctx.project,
+    settings: ctx.settings,
+    shotId: reqString(args, "shotId"),
+    signal: ctx.signal,
+    onProgress: (percent, label) => ctx.emit({ type: "progress", scope: "resume_shot", percent, label }),
+    probeOnly: args.probeOnly === true,
   });
   ctx.emit({ type: "state", project: ctx.project });
   return { ok: true, ...result };
@@ -879,6 +914,7 @@ const handlers: Record<string, (ctx: ToolContext, args: Args) => Promise<unknown
   set_shot_references: setShotReferences,
   build_shot_prompt: buildPrompt,
   generate_shot: generateShotTool,
+  resume_shot: resumeShotTool,
   generate_still: generateStillTool,
   stitch_shots: stitchShotsTool,
   list_assets: listAssets,

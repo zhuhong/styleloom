@@ -53,6 +53,7 @@ const toolLabels = {
   build_shot_prompt: "编写 H3 提示词",
   generate_still: "生成定妆照 / 场景照",
   generate_shot: "生成视频",
+  resume_shot: "恢复已提交任务",
   set_shot_references: "绑定参考素材",
   stitch_shots: "拼接成片",
   list_assets: "查看素材",
@@ -133,7 +134,7 @@ function skillKindLabel(kind) {
 }
 
 function shotStatusLabel(status) {
-  const labels = { planned: "待生成", promptReady: "提示词就绪", generating: "生成中", done: "已完成", failed: "失败" };
+  const labels = { planned: "待生成", promptReady: "提示词就绪", generating: "生成中", done: "已完成", pending: "待恢复", failed: "失败" };
   return labels[status] || status;
 }
 

@@ -116,6 +116,7 @@ docs/              deploy, local GPU, skills, xhs, H3 prompting, examples
 
 - `build_shot_prompt`, `plan_shots`, skill operations: **free**.
 - `generate_shot`: **billed**, and refuses to run without `confirmed=true`. The agent must show the plan and prompt and get explicit consent first.
+- A shot whose render is already submitted but abandoned locally becomes `pending`, not `failed`. `generate_shot` then refuses to re-render it (that would bill twice) — use `resume_shot` to keep polling the existing task for free.
 - API keys live only in `data/settings.json` (git-ignored, masked in API responses). A `pre-commit` hook rejects staged secrets.
 - Reference footage is used for **style, camera work and art direction only**. Replicating a real person's identity is not the default.
 

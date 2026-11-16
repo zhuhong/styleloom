@@ -160,7 +160,14 @@ export type StyleBible = {
   };
 };
 
-export type ShotStatus = "planned" | "promptReady" | "generating" | "done" | "failed";
+export type ShotStatus =
+  | "planned"
+  | "promptReady"
+  | "generating"
+  | "done"
+  /** 已提交到平台但本地放弃了等待；任务可能仍在平台排队，可用 resume 接回 */
+  | "pending"
+  | "failed";
 
 export type ShotReferenceImage = {
   path: string;
@@ -211,6 +218,8 @@ export type ShotPlan = {
   promptMode?: PromptMode;
   video?: string;
   videoId?: string;
+  /** 平台任务创建时刻（ISO），用于恢复时按真实排队时长判断超时 */
+  videoCreatedAt?: string;
   error?: string;
   updatedAt?: string;
 };

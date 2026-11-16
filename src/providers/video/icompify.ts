@@ -120,31 +120,82 @@ export async function generateVideoJob(request: VideoJob): Promise<VideoResult> 
   if (!videoId) throw new Error("icompify 未返回任务 ID");
   request.onVideoId?.(videoId);
 
-  const started = Date.now();
+  const result = await pollVideoJob({
+    videoId,
+    task,
+    model,
+    signal,
+    onProgress: request.onProgress,
+    // 从创建时刻开始计时；恢复时由调用方传入任务原始 created_at。
+    startedAt: Date.now(),
+    maxWaitMs: settings.video.maxWaitMs,
+    pollIntervalMs: settings.video.pollIntervalMs,
+  });
+  if (!("bytes" in result)) throw new Error(`icompify 任务未返回视频内容：${videoId}`);
+  return result;
+}
+
+export type PollVideoJobOptions = {
+  videoId: string;
+  /** 恢复时未知，用 auto */
+  task?: string;
+  model?: string;
+  signal: AbortSignal;
+  onProgress?: (status: string, elapsedSeconds: number, percent?: number) => void;
+  /** 任务创建时刻（毫秒）；省略则按「现在」算，用于 resume 时按真实排队时长判断超时 */
+  startedAt?: number;
+  maxWaitMs?: number;
+  pollIntervalMs?: number;
+  /** 只查一次状态，不等待、不下载 */
+  once?: boolean;
+};
+
+/**
+ * 轮询已有任务直到完成并下载。
+ * 与 generateVideoJob 共用同一套逻辑，区别是这里不创建任务，所以恢复不会重复计费。
+ */
+export async function pollVideoJob(options: PollVideoJobOptions): Promise<VideoResult | { videoId: string; status: string; platform: Record<string, unknown> }> {
+  const settings = await loadSettings();
+  const apiKey = settings.video.apiKey.trim();
+  if (!apiKey) throw new Error("尚未配置 icompify API Key");
+  const baseUrl = settings.video.baseUrl.trim().replace(/\/+$/, "").replace(/\/v1$/, "");
+  const { videoId, signal } = options;
+  const maxWaitMs = options.maxWaitMs ?? settings.video.maxWaitMs;
+  const pollIntervalMs = options.pollIntervalMs ?? settings.video.pollIntervalMs;
+  const started = options.startedAt ?? Date.now();
+
+  const fetchInfo = () => requestJson(`${baseUrl}/v1/videos/${encodeURIComponent(videoId)}`, apiKey, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+  }, AbortSignal.any([signal, AbortSignal.timeout(60_000)]));
+
+  // once 模式只查一次，供工具快速回报状态，不做长轮询。
+  if (options.once) {
+    const info = await fetchInfo();
+    return { videoId, status: String(info.status ?? "").toLowerCase(), platform: info };
+  }
+
   let failures = 0;
   while (true) {
-    await wait(signal, settings.video.pollIntervalMs);
     const elapsed = Math.round((Date.now() - started) / 1000);
     let info: Record<string, unknown>;
     try {
-      info = await requestJson(`${baseUrl}/v1/videos/${encodeURIComponent(videoId)}`, apiKey, {
-        method: "GET",
-        headers: { Accept: "application/json" },
-      }, AbortSignal.any([signal, AbortSignal.timeout(60_000)]));
+      info = await fetchInfo();
       failures = 0;
     } catch (error) {
       if (signal.aborted) throw error;
       failures += 1;
       // ACT: 单次查询失败不代表任务失败，连续 5 次才放弃；videoId 可继续恢复。
       if (failures >= 5) throw error;
-      request.onProgress?.(`查询失败，重试 ${failures}/5`, elapsed);
+      options.onProgress?.(`查询失败，重试 ${failures}/5`, elapsed);
+      await wait(signal, pollIntervalMs);
       continue;
     }
     const status = String(info.status ?? "").toLowerCase();
     const percent = typeof info.progress === "number" ? info.progress : undefined;
-    request.onProgress?.(status || "processing", elapsed, percent);
+    options.onProgress?.(status || "processing", elapsed, percent);
     if (status === "completed") {
-      request.onProgress?.("下载中", elapsed);
+      options.onProgress?.("下载中", elapsed);
       const response = await fetch(`${baseUrl}/v1/videos/${encodeURIComponent(videoId)}/content`, {
         headers: { Authorization: `Bearer ${apiKey}` },
         signal: AbortSignal.any([signal, AbortSignal.timeout(600_000)]),
@@ -152,14 +203,22 @@ export async function generateVideoJob(request: VideoJob): Promise<VideoResult> 
       if (!response.ok) throw new Error(`icompify 视频下载失败：HTTP ${response.status}`);
       const bytes = new Uint8Array(await response.arrayBuffer());
       if (!bytes.byteLength) throw new Error("icompify 返回的视频内容为空");
-      return { videoId, bytes, mimeType: "video/mp4", task, model, platform: info };
+      return {
+        videoId,
+        bytes,
+        mimeType: "video/mp4",
+        task: options.task ?? String(info.task ?? ""),
+        model: options.model ?? String(info.model ?? ""),
+        platform: info,
+      };
     }
     if (status === "failed" || status === "cancelled" || status === "canceled") {
       throw new Error(`icompify 任务失败：${JSON.stringify(info).slice(0, 500)}`);
     }
-    if (Date.now() - started > settings.video.maxWaitMs) {
-      throw new Error(`icompify 任务超过 ${Math.round(settings.video.maxWaitMs / 60000)} 分钟仍未完成，video_id=${videoId}，可稍后手动恢复`);
+    if (Date.now() - started > maxWaitMs) {
+      throw new Error(`icompify 任务超过 ${Math.round(maxWaitMs / 60000)} 分钟仍未完成，video_id=${videoId}，可用 resume_shot 继续等待`);
     }
+    await wait(signal, pollIntervalMs);
   }
 }
 

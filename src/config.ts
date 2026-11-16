@@ -100,7 +100,9 @@ export const defaultSettings: Settings = {
     aspectRatio: "16:9",
     steps: 50,
     pollIntervalMs: 10000,
-    maxWaitMs: 3600000,
+    // 平台排队时间不可控，60 分钟曾出现排队未开始推理；放宽到 120 分钟，
+    // 真正兜底靠 resume_shot 接回，而不是靠超时。
+    maxWaitMs: 7200000,
     local: {
       baseUrl: "http://127.0.0.1:8000",
       token: "",

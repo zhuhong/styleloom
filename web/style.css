@@ -214,7 +214,7 @@ code { background: #1f2733; padding: 1px 5px; border-radius: 5px; font-size: 12p
 .shortBadge { padding: 0 5px; border: 1px solid #6b4d13; border-radius: 999px; background: #2a1f0b; color: #fbbf24; font-size: 10px; line-height: 1.6; white-space: nowrap; }
 .state.done { color: var(--accent); }
 .state.failed { color: var(--danger); }
-.state.generating, .state.promptReady { color: #fbbf24; }
+.state.generating, .state.promptReady, .state.pending { color: #fbbf24; }
 .planAction { margin: 6px 0 0; font-size: 12px; color: #b9c2cf; }
 .planRow video { width: 100%; margin-top: 8px; border-radius: 8px; background: #000; }
 .planRow details { margin-top: 7px; font-size: 11px; color: var(--muted); }
@@ -337,7 +337,8 @@ code { background: #1f2733; padding: 1px 5px; border-radius: 5px; font-size: 12p
 .planHead .state { margin-left: auto; padding: 2px 7px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel2); font-size: 10px; }
 .state.done { color: var(--accent); border-color: #2b5c4c; background: #16342b; }
 .state.failed { color: var(--danger); border-color: #5b2626; background: #2a1717; }
-.state.generating, .state.promptReady { color: #fbbf24; border-color: #5b4a1f; background: #2a2417; }
+.state.generating, .state.promptReady, .state.pending { color: #fbbf24; border-color: #5b4a1f; background: #2a2417; }
+.state.pending { border-style: dashed; }
 .statusDot { display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; background: var(--muted); vertical-align: 1px; }
 .statusDot.active { background: var(--accent); }
 .statusDot.candidate { background: #fbbf24; }

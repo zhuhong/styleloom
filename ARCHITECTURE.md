@@ -5,7 +5,7 @@
 1. **学习与生成解耦**：学习产出纯 JSON（`styleBible` + `slice.json`），生成只消费 JSON，不依赖某次对话。
 2. **每一层都能单独跑**：切片、标注、归纳、提示词、提交生成都是独立函数，Agent 只是调度器。
 3. **可恢复**：逐镜分析每完成一镜就落盘；H3 先创建任务再轮询，`videoId` 会写回分镜。
-4. **费用边界明确**：`build_shot_prompt` 不花钱；`generate_shot` 必须 `confirmed=true`。
+4. **费用边界明确**：`build_shot_prompt` 不花钱；`generate_shot` 必须 `confirmed=true`；已提交未完成的任务只能用 `resume_shot` 接回，避免二次计费。
 5. **零运行时依赖**：Bun 自带 HTTP、spawn、文件与 WebSocket/Stream；只有 devDependencies。
 
 ## 请求生命周期
@@ -143,6 +143,27 @@ Agent 在规划前 `search_skills`、命中后 `read_skill`，把 prompt fragmen
 
 校验规则（`validatePrompt`）：字段齐全且顺序正确、对齐句逐字匹配、Ref2VA 必须有六段、长度 ≤ 7000。
 
+### 排队、超时与恢复
+
+icompify 的 H3 是共享 GPU 池，`status=queued` 时 `progress` 恒为 0、`inference_time_s` 为 null，排队时长不可控（实测出现过 44 分钟仍未开始推理，而正常情况 144 秒出片）。
+
+分镜状态机因此有一个专门的 `pending`：
+
+```
+planned → promptReady → generating → done
+                            │
+                            ├─ 平台失败 / 素材非法 → failed
+                            └─ 本地放弃等待（超时或 client 断开）→ pending
+                                                                  │
+                                                       resume_shot ┴→ done / failed
+```
+
+- `pending` 表示**任务已提交并已计费**，只是本地不再等待。`shot.videoId` 与 `videoCreatedAt` 都会保留。
+- `pollVideoJob`（`providers/video/icompify.ts`）被 `generateVideoJob` 与 `resume_shot` 共用：前者创建后调用，后者直接用已有 `videoId` 调用，因此恢复不会新建任务、不重复计费。
+- `resume_shot` 用 `videoCreatedAt` 作为计时起点，所以恢复时按任务真实年龄判断超时，而不是从恢复时刻重新计 120 分钟。
+- `generate_shot` 遇到 `shot.videoId` 存在且 `status !== "done"` 会直接拒绝，提示改用 `resume_shot`；确实要丢弃旧任务才传 `force=true`。
+- `maxWaitMs` 默认 120 分钟，仅作兜底；真正的恢复手段是 `resume_shot`。
+
 ## 数据模型
 
 `Project`（`project.json`）是唯一状态源：
@@ -178,7 +199,8 @@ Agent 在规划前 `search_skills`、命中后 `read_skill`，把 prompt fragmen
 | `set_shot_references` | 把项目内图片/视频绑定到分镜（Ref2VA/I2VA/FL2VA） | 无 |
 | `build_shot_prompt` | 生成并校验 H3 提示词 | 文本模型 |
 | `generate_still` | 定妆照/场景照（本地 GPU / 远程接口 / 回退参考帧） | 本地免费；远程按张计费 |
-| `generate_shot` | H3 生成单镜（需确认） | icompify 按次计费；本地网关免费 |
+| `generate_shot` | H3 生成单镜（需确认；已有未完成任务时会拒绝，除非 `force=true`） | icompify 按次计费；本地网关免费 |
+| `resume_shot` | 接回已提交但本地放弃等待的任务（`probeOnly` 只查状态） | 无（任务已计费） |
 | `stitch_shots` | 统一转码后拼接分镜（硬切/叠化），输出成片 | 无（本地 ffmpeg） |
 | `list_assets` | 查看状态 | 无 |
 | `list_style_packs` | 查看风格包 | 无 |

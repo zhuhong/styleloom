@@ -116,6 +116,7 @@ docs/              部署、本地 GPU、技能、小红书、H3 提示词、示
 
 - `build_shot_prompt`、`plan_shots`、技能类操作：**免费**。
 - `generate_shot`：**计费**，没有 `confirmed=true` 一律拒绝；Agent 必须先展示分镜与提示词并取得明确同意。
+- 已提交但本地放弃等待的镜头会标为 `pending` 而不是 `failed`。此时 `generate_shot` 会拒绝重做（那会二次计费），改用 `resume_shot` 免费接回原任务。
 - API Key 只存在 `data/settings.json`（git 忽略、接口打码），`pre-commit` 钩子拦截密钥入库。
 - 参考片只用于**借风格、运镜、美术**，不默认复刻真人身份。
 

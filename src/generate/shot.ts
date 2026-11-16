@@ -7,6 +7,7 @@ import { ensureDir, removeDir, safeJoin, stamp } from "../util/fs";
 import { runFfmpeg } from "../util/ffmpeg";
 import { H3_SAFE_MIN_SECONDS, normalizeShotDuration, providerDurationFor } from "../util/duration";
 import { generateVideoJob } from "../providers/video";
+import { pollVideoJob } from "../providers/video/icompify";
 import { composeShotPrompt, prepareReferences, validatePrompt } from "./prompt";
 import { markSkillUsed } from "../store/skills";
 
@@ -127,6 +128,7 @@ export async function generateShot(options: GenerateShotOptions): Promise<Genera
       signal,
       onVideoId: videoId => {
         shot.videoId = videoId;
+        shot.videoCreatedAt = new Date().toISOString();
         void saveProject(project).catch(() => {});
       },
       onProgress: (status, elapsed, percent) => {
@@ -191,8 +193,15 @@ export async function generateShot(options: GenerateShotOptions): Promise<Genera
       providerNotes: result.notes ?? [],
     };
   } catch (error) {
-    shot.status = "failed";
-    shot.error = error instanceof Error ? error.message : String(error);
+    const message = error instanceof Error ? error.message : String(error);
+    // 已提交过任务、只是本地不再等待：任务可能仍在平台排队，标为 pending 而不是 failed，
+    // 否则用户会以为没提交过，重新生成等于二次计费。
+    const submitted = Boolean(shot.videoId);
+    const abandoned = submitted && (signal.aborted || /仍未完成|超时|取消|aborted/i.test(message));
+    shot.status = abandoned ? "pending" : "failed";
+    shot.error = abandoned
+      ? `${message}（任务已提交，video_id=${shot.videoId}，可用 resume_shot 继续等待，不会重复计费）`
+      : message;
     shot.updatedAt = new Date().toISOString();
     await saveProject(project);
     throw error;
@@ -201,3 +210,121 @@ export async function generateShot(options: GenerateShotOptions): Promise<Genera
   }
 }
 
+
+export type ResumeShotOptions = {
+  project: Project;
+  settings: Settings;
+  shotId: string;
+  signal: AbortSignal;
+  onProgress: (percent: number, label: string) => void;
+  /** 只查状态并回报，不下载、不写素材 */
+  probeOnly?: boolean;
+};
+
+export type ResumeShotResult = {
+  shotId: string;
+  videoId: string;
+  status: "completed" | "queued" | "processing" | "pending";
+  platformStatus: string;
+  elapsedSeconds: number;
+  video?: string;
+  bytes?: number;
+  /** true 表示只是查了一次状态，没有下载 */
+  probed?: boolean;
+};
+
+/**
+ * 接回一个已提交但本地放弃等待的任务。
+ * 不创建新任务、不产生新费用；下载已完成的任务，或继续轮询到完成。
+ */
+export async function resumeShot(options: ResumeShotOptions): Promise<ResumeShotResult> {
+  const { project, shotId, signal, onProgress } = options;
+  const shot = shotById(project, shotId);
+  const videoId = shot.videoId?.trim();
+  if (!videoId) throw new Error(`分镜 ${shotId} 没有已提交的平台任务，无法恢复；请用 generate_shot 新建`);
+  const root_ = projectDir(project.id);
+
+  const createdAt = shot.videoCreatedAt ? Date.parse(shot.videoCreatedAt) : undefined;
+  const startedAt = Number.isFinite(createdAt) ? createdAt : undefined;
+
+  onProgress(10, `查询任务 ${videoId}`);
+  if (options.probeOnly) {
+    const probe = await pollVideoJob({ videoId, signal, once: true });
+    const status = "status" in probe ? probe.status : "unknown";
+    const info = probe.platform ?? {};
+    const created = typeof info.created_at === "number" ? info.created_at * 1000 : startedAt;
+    return {
+      shotId,
+      videoId,
+      status: status === "completed" ? "completed" : status === "queued" ? "queued" : status === "processing" ? "processing" : "pending",
+      platformStatus: status,
+      elapsedSeconds: created ? Math.round((Date.now() - created) / 1000) : 0,
+      probed: true,
+    };
+  }
+
+  onProgress(20, `继续等待 ${videoId}`);
+  const result = await pollVideoJob({
+    videoId,
+    signal,
+    startedAt,
+    onProgress: (status, elapsed, percent) => {
+      const value = typeof percent === "number" ? 20 + Math.min(60, percent * 0.6) : 40;
+      onProgress(Math.round(value), `H3 ${status} · ${elapsed}s`);
+    },
+  });
+  if (!("bytes" in result)) throw new Error(`任务 ${videoId} 未返回视频内容`);
+
+  onProgress(90, "保存视频");
+  await ensureDir(join(root_, "assets", "videos"));
+  const requestedDuration = normalizeShotDuration(shot.durationSeconds, `镜头 ${shotId} `);
+  const providerDuration = providerDurationFor(requestedDuration, false);
+  const willTrim = providerDuration !== requestedDuration;
+  const relative = `assets/videos/${shotId}-${stamp()}.mp4`;
+  let tempDir: string | undefined;
+  try {
+    if (willTrim) {
+      tempDir = join(dataDir, "cache", "short-shots", `${project.id}-${shotId}-${stamp()}`);
+      await ensureDir(tempDir);
+      const rawPath = join(tempDir, "raw.mp4");
+      await writeFile(rawPath, result.bytes);
+      await trimVideo(rawPath, join(root_, relative), requestedDuration, signal);
+    } else {
+      await writeFile(join(root_, relative), result.bytes);
+    }
+  } finally {
+    if (tempDir) await removeDir(tempDir).catch(() => undefined);
+  }
+
+  shot.video = relative;
+  shot.status = "done";
+  shot.error = undefined;
+  shot.updatedAt = new Date().toISOString();
+  addAsset(project, {
+    kind: "video",
+    path: relative,
+    label: `${shotId} ${shot.title}`,
+    meta: {
+      shotId,
+      model: result.model,
+      task: result.task,
+      videoId: result.videoId,
+      requestedDurationSeconds: requestedDuration,
+      providerDurationSeconds: providerDuration,
+      trimmed: willTrim,
+      source: "resume",
+    },
+  });
+  if (project.stage === "plan" || project.stage === "study") project.stage = "generate";
+  await saveProject(project);
+  onProgress(100, `${shotId} 恢复完成`);
+  return {
+    shotId,
+    videoId,
+    status: "completed",
+    platformStatus: "completed",
+    elapsedSeconds: startedAt ? Math.round((Date.now() - startedAt) / 1000) : 0,
+    video: relative,
+    bytes: result.bytes.length,
+  };
+}

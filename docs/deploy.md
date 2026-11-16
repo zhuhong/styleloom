@@ -70,7 +70,7 @@ chmod 600 data/settings.json
 | `video.baseUrl` | `https://api.icompify.com` | icompify 地址 |
 | `video.model` / `referenceModel` | `minimax-h3-fl2va` / `minimax-h3-ref2va` | 文生/首尾帧 与 参考模型 |
 | `video.shortEdge` / `steps` | `768` / `50` | 云端输出短边与推理步数 |
-| `video.pollIntervalMs` / `maxWaitMs` | `10000` / `3600000` | 轮询间隔与最长等待 |
+| `video.pollIntervalMs` / `maxWaitMs` | `10000` / `7200000` | 轮询间隔与最长等待（120 分钟；超时后可用 `resume_shot` 接回，不重复计费） |
 | `xhs.ytDlpPath` | `yt-dlp` | 二进制路径 |
 | `xhs.cookiesFromBrowser` | `chrome` | `chrome` / `safari` / `firefox` / `edge` / 留空表示不读 Cookie |
 | `xhs.referer` / `userAgent` / `timeoutMs` | 见示例文件 | 下载请求头与超时 |

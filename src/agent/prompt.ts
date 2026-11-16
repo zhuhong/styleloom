@@ -86,6 +86,7 @@ export async function buildSystemPrompt(project: Project, settings: Settings) {
    用户上传了图片/视频时，先用 list_assets 确认路径，再用 set_shot_references 绑定到具体分镜；不要假设上传文件就是首帧。
 7. 所有镜头生成后，用 stitch_shots 拼接成片（本地 ffmpeg，不额外计费）；默认按分镜顺序硬切，需要转场时传 transitionSeconds。不要只给用户 ffmpeg 命令。
 8. 生成/拼接完成后用 list_assets 核对，向用户说明成片路径与镜头状态。
+9. 生成超时或中断时任务可能仍在平台排队，且已经计费。用 resume_shot 接回（probeOnly=true 先查状态），**不要**直接重新 generate_shot —— 那会二次计费。镜头状态显示 pending 就表示「已提交、本地放弃等待」，必须 resume 或明确征得用户同意后传 force=true 重做。
 
 ## 全局技能库
 技能库是跨项目积累的方法（运镜/灯光/构图/节奏/提示词/流程/避坑），和项目内的「风格圣经」不是一回事。技能有两个来源：

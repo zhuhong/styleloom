@@ -21,7 +21,7 @@
     "aspectRatio": "16:9",
     "steps": 50,
     "pollIntervalMs": 10000,
-    "maxWaitMs": 3600000,
+    "maxWaitMs": 7200000,
     "local": {
       "baseUrl": "http://127.0.0.1:8000",
       "token": "",
