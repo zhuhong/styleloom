@@ -152,6 +152,7 @@ const dictionaries = {
     "plan.shortBadgeTitle": "低于 H3 常规下限 4 秒；默认 4 秒生成后裁剪",
     "plan.action": "镜头描述",
     "plan.prompt": "H3 提示词 · {mode}",
+    "plan.viewJobs": "查看渲染队列",
     "plan.panelHint": "进度见右侧「渲染」面板",
     "plan.panelDone": "已转后台渲染，进度见右侧面板",
 
@@ -406,6 +407,7 @@ const dictionaries = {
     "plan.shortBadgeTitle": "Below H3's usual 4s minimum; generates at 4s then trims",
     "plan.action": "Shot description",
     "plan.prompt": "H3 prompt · {mode}",
+    "plan.viewJobs": "View render queue",
     "plan.panelHint": "Progress is in the Render panel on the right",
     "plan.panelDone": "Moved to background rendering; progress is in the right panel",
 

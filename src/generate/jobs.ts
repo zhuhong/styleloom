@@ -218,8 +218,12 @@ async function runResume(job: RenderJob) {
 }
 
 /**
- * 服务重启后，内存里的任务全丢，但 project.json 里可能留着 status="generating"。
- * 这些镜头其实已经把任务提交给平台了，标成 pending 让用户走 resume，而不是当成没生成。
+ * 服务重启后，内存里的任务全丢，但 project.json 里可能留着渲染中的痕迹。
+ * 判定依据是「有 videoId 且未 done」而不是只看 status：
+ * generateShot 会先把 status 写成 generating 落盘，拿到平台任务 ID 后再写一次
+ * videoId，这两次写盘之间存在窗口，重启时可能落在 status=promptReady 但
+ * videoId 已存在的状态（真实踩到过）。只要拿到了 videoId 就说明已经计费，
+ * 一律标 pending 让用户走 resume，不能当成没生成。
  */
 export async function reconcileStaleJobs() {
   const repaired: string[] = [];
@@ -227,7 +231,9 @@ export async function reconcileStaleJobs() {
     await mutateProject(summary.id, project => {
       let changed = false;
       for (const shot of project.plan) {
-        if (shot.status !== "generating") continue;
+        if (shot.status === "done" || shot.status === "failed" || shot.status === "pending") continue;
+        const unfinished = shot.status === "generating";
+        if (!unfinished && !shot.videoId) continue;
         if (shot.videoId) {
           shot.status = "pending";
           shot.error = `服务重启时该镜头仍在渲染（video_id=${shot.videoId}），任务可能已在平台完成，可用 resume_shot 接回。`;
@@ -241,6 +247,26 @@ export async function reconcileStaleJobs() {
       }
       return changed;
     });
+    // 把盘上的 pending 镜头回填成一条 job，否则重启后「渲染」面板是空的，
+    // 用户看不到可恢复的任务，只能去分镜页找。
+    const project = await getProject(summary.id);
+    for (const shot of project.plan) {
+      if (shot.status !== "pending" || !shot.videoId) continue;
+      if (activeJobForShot(summary.id, shot.id)) continue;
+      const job: RenderJob = {
+        id: `job_${crypto.randomUUID().slice(0, 8)}`,
+        projectId: summary.id,
+        shotId: shot.id,
+        status: "pending",
+        percent: 0,
+        label: "已提交，等待恢复",
+        startedAt: shot.videoCreatedAt || shot.updatedAt || now(),
+        updatedAt: shot.updatedAt || now(),
+        videoId: shot.videoId,
+        error: shot.error,
+      };
+      jobs.set(job.id, job);
+    }
   }
   return repaired;
 }

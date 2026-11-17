@@ -20,6 +20,9 @@ const state = {
   /** 右侧「渲染」面板的数据，来自 /jobs/stream */
   jobs: [],
   jobsSource: null,
+  /** SSE 断线重连次数与定时器（指数退避） */
+  jobsRetry: 0,
+  jobsRetryTimer: null,
 };
 
 const els = {
@@ -589,6 +592,11 @@ function renderJobs(project) {
 
 function renderPlan(project) {
   const plan = project.plan || [];
+  // 分镜卡片里也要能看到实时进度，否则用户在「分镜」页会以为没反应。
+  const jobByShot = new Map();
+  for (const job of state.jobs || []) {
+    if (job.status === "running" || job.status === "pending") jobByShot.set(job.shotId, job);
+  }
   if (!plan.length) {
     return `<section class="inspectorSection">
       <div class="sectionHead"><h3>${escapeHtml(t("plan.title"))}</h3><span class="count">0</span></div>
@@ -604,6 +612,8 @@ function renderPlan(project) {
         ? (project.assets || []).find(asset => asset.kind === "frame" && asset.meta?.shotId === shot.id && (asset.label.includes("预览") || asset.path.includes("preview")))
         : undefined;
       const posterUrl = preview ? fileUrl(project.id, preview.path) : "";
+      const liveJob = jobByShot.get(shot.id);
+      const livePercent = liveJob ? Math.max(0, Math.min(100, Math.round(liveJob.percent || 0))) : 0;
       return `<div class="planRow">
         <div class="planBody">
           <div class="planMiniMedia">
@@ -612,6 +622,7 @@ function renderPlan(project) {
           <div class="planInfo">
             <div class="planHead"><b>${escapeHtml(shot.id)}</b><span class="muted">${formatSeconds(shot.durationSeconds)}</span>${shot.durationSeconds < 4 ? `<span class="shortBadge" title="${escapeHtml(t("plan.shortBadgeTitle"))}">${escapeHtml(t("plan.shortBadge"))}</span>` : ""}<span class="state ${escapeHtml(shot.status)}">${escapeHtml(shotStatusLabel(shot.status))}</span></div>
             <p class="planAction"><b>${escapeHtml(shot.title)}</b></p>
+            ${liveJob ? `<div class="planLive"><div class="progress"><i style="width:${livePercent}%"></i></div><span class="planLiveLabel">${livePercent}% · ${escapeHtml(liveJob.label || "")}</span><button class="textButton" type="button" data-inspector-jump="jobs">${escapeHtml(t("plan.viewJobs"))}</button></div>` : ""}
             ${shot.action ? `<details class="fold planDetails"><summary>${escapeHtml(t("plan.action"))}</summary><p>${escapeHtml(shot.action)}</p></details>` : ""}
             ${shot.error ? `<p class="inlineWarning error">${escapeHtml(shot.error)}</p>` : ""}
             ${shot.prompt ? `<details><summary>${escapeHtml(t("plan.prompt", { mode: shot.promptMode || "" }))}</summary><pre>${escapeHtml(shot.prompt)}</pre></details>` : ""}
@@ -664,7 +675,8 @@ function renderInspector(project = state.project, shots = state.shots) {
   const assetCount = (project.assets || []).length;
   const skillCount = (state.skills || []).length;
   const requested = state.inspectorTab;
-  const runningJobs = (state.jobs || []).filter(job => job.status === "running" || job.status === "pending").length;
+  const activeJobs = (state.jobs || []).filter(job => job.status === "running" || job.status === "pending");
+  const runningJobs = activeJobs.length;
   const tabs = [
     ["overview", t("inspector.tabOverview"), 0],
     ["shots", t("inspector.tabShots"), planCount],
@@ -672,7 +684,10 @@ function renderInspector(project = state.project, shots = state.shots) {
     ["assets", t("inspector.tabAssets"), assetCount],
     ["skills", t("inspector.tabSkills"), skillCount],
   ];
-  const tab = tabs.some(([id]) => id === requested) ? requested : (planCount ? "shots" : "overview");
+  // 用户没选过 Tab 时，有任务在跑就直接落到「渲染」，否则退回分镜/概览。
+  // 否则 Agent 说「进度见右侧面板」，用户看到的却是分镜表。
+  const fallback = runningJobs ? "jobs" : (planCount ? "shots" : "overview");
+  const tab = tabs.some(([id]) => id === requested) ? requested : fallback;
   const bible = project.styleBible;
   const brief = project.brief || {};
   const learning = project.learning || { status: "none" };
@@ -723,15 +738,32 @@ async function refreshDetail() {
 }
 
 /** 订阅渲染进度；切换项目时先断开旧的。 */
-function connectJobs(projectId) {
+function connectJobs(projectId, options = {}) {
   if (state.jobsSource) {
     state.jobsSource.close();
     state.jobsSource = null;
   }
-  state.jobs = [];
+  clearTimeout(state.jobsRetryTimer);
+  state.jobsRetryTimer = null;
+  // 换项目时才清空；重连时保留旧数据，避免面板闪成空壳。
+  if (!options.keepJobs) state.jobs = [];
   if (!projectId) return;
   const source = new EventSource(`/api/projects/${encodeURIComponent(projectId)}/jobs/stream`);
   state.jobsSource = source;
+  source.onopen = () => {
+    // 连接成功（含重连），重置退避计数并主动拉一次快照，
+    // 否则断线期间的变化要等到下一次 job 事件才能补上。
+    state.jobsRetry = 0;
+    if (options.keepJobs) {
+      api(`/api/projects/${encodeURIComponent(projectId)}/jobs`)
+        .then(data => {
+          if (state.project?.id !== projectId) return;
+          state.jobs = data.jobs || [];
+          renderInspector();
+        })
+        .catch(() => {});
+    }
+  };
   source.onmessage = event => {
     let payload;
     try {
@@ -741,6 +773,7 @@ function connectJobs(projectId) {
     }
     if (payload.type === "snapshot") {
       state.jobs = payload.jobs || [];
+      state.jobsRetry = 0;
       renderInspector();
       return;
     }
@@ -757,9 +790,19 @@ function connectJobs(projectId) {
     }
   };
   source.onerror = () => {
-    // EventSource 会自己重连；这里只清掉连接状态避免叠加。
+    // ACT: 原实现直接 close() 就再也不重连了，SSE 一抖动进度就永久停更。
+    // 这里改成指数退避重连（1s/2s/4s/8s/16s/30s 封顶），只重连当前项目。
+    if (state.jobsSource !== source) return;
     source.close();
-    if (state.jobsSource === source) state.jobsSource = null;
+    state.jobsSource = null;
+    const attempt = state.jobsRetry + 1;
+    state.jobsRetry = attempt;
+    const delay = Math.min(30000, 1000 * 2 ** Math.min(attempt - 1, 5));
+    clearTimeout(state.jobsRetryTimer);
+    state.jobsRetryTimer = setTimeout(() => {
+      state.jobsRetryTimer = null;
+      if (state.project?.id === projectId && !state.jobsSource) connectJobs(projectId, { keepJobs: true });
+    }, delay);
   };
 }
 
@@ -1157,6 +1200,14 @@ els.inspector.addEventListener("click", event => {
   const tab = event.target.closest("[data-inspector-tab]");
   if (tab) {
     state.inspectorTab = tab.dataset.inspectorTab;
+    els.inspector.scrollTop = 0;
+    renderInspector();
+    return;
+  }
+  // 分镜页的「查看渲染队列」按钮
+  const jump = event.target.closest("[data-inspector-jump]");
+  if (jump) {
+    state.inspectorTab = jump.dataset.inspectorJump;
     els.inspector.scrollTop = 0;
     renderInspector();
     return;

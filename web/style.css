@@ -167,6 +167,12 @@ code { background: #1f2733; padding: 1px 5px; border-radius: 5px; font-size: 12p
 .jobActions { display: flex; gap: 8px; margin-top: 8px; }
 .jobActions:empty { display: none; }
 
+/* 分镜卡片里的实时进度：让用户停在「分镜」页也能看到渲染推进 */
+.planLive { margin-top: 6px; }
+.planLive .progress { margin-top: 0; }
+.planLiveLabel { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.planLive .textButton { margin-top: 4px; font-size: 11px; }
+
 .composer { display: flex; align-items: stretch; gap: 10px; padding: 12px 18px; border-top: 1px solid var(--line); background: rgba(18, 22, 28, 0.85); }
 .composer.dragging { background: rgba(52, 211, 153, 0.08); box-shadow: inset 0 0 0 1px #3a6b5c; }
 .composerMain { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 8px; }
