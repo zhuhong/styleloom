@@ -750,6 +750,17 @@ async function generateShotTool(ctx: ToolContext, args: Args) {
     return { ok: false, error: "生成视频会产生费用。请先向用户展示分镜和提示词，取得明确同意后，再以 confirmed=true 调用。" };
   }
   const shot = ctx.project.plan.find(item => item.id === shotId);
+  // 内存里已有 running job（即便盘上 videoId 被旧快照抹掉）也不允许再提交。
+  const live = activeJobForShot(ctx.project.id, shotId);
+  if (live && (live.status === "running" || live.status === "pending") && args.force !== true) {
+    return {
+      ok: false,
+      error: `镜头 ${shotId} 已有后台任务在跑（${live.label}${live.videoId ? `，video_id=${live.videoId}` : ""}）。请等右侧渲染面板结束，或用 resume_shot；不要重新 generate_shot。`,
+      jobId: live.id,
+      videoId: live.videoId,
+      status: live.status,
+    };
+  }
   // 已有提交过但未完成的任务：直接新建会二次计费，先让调用方明确处理。
   if (shot?.videoId && shot.status !== "done" && args.force !== true) {
     return {
@@ -822,6 +833,15 @@ async function generateStillTool(ctx: ToolContext, args: Args) {
 }
 
 async function listAssets(ctx: ToolContext) {
+  const jobs = listJobs(ctx.project.id).map(job => ({
+    id: job.id,
+    shotId: job.shotId,
+    status: job.status,
+    percent: job.percent,
+    label: job.label,
+    videoId: job.videoId,
+    error: job.error,
+  }));
   return {
     ok: true,
     stage: ctx.project.stage,
@@ -831,12 +851,16 @@ async function listAssets(ctx: ToolContext) {
       title: shot.title,
       status: shot.status,
       video: shot.video,
+      videoId: shot.videoId,
       promptMode: shot.promptMode,
       firstFrame: shot.firstFrame,
       lastFrame: shot.lastFrame,
       referenceImages: shot.referenceImages ?? [],
       referenceVideos: shot.referenceVideos ?? [],
+      error: shot.error,
     })),
+    // 后台渲染以 jobs 为准；plan.videoId 可能因旧快照写盘短暂缺失，切勿仅凭 plan 判断「无平台任务」。
+    jobs,
     files: { project: `projects/${ctx.project.id}/project.json`, bible: ctx.project.styleBible ? "learning/styleBible.md" : undefined },
   };
 }

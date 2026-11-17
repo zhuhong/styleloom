@@ -24,6 +24,15 @@ export type RenderJob = {
 const jobs = new Map<string, RenderJob>();
 /** 每个项目一个订阅者集合，用于把进度推给右侧面板。 */
 const subscribers = new Map<string, Set<(job: RenderJob) => void>>();
+/**
+ * 正在跑的 generateShot 持有的镜头快照读取器。
+ * 对话旧快照可能把盘上 videoId 抹掉，重启前可用 flushLiveVideoIds 把内存里的任务 ID 写回盘。
+ */
+const liveShotReaders = new Map<string, () => string | undefined>();
+
+function liveKey(projectId: string, shotId: string) {
+  return `${projectId}::${shotId}`;
+}
 
 function now() {
   return new Date().toISOString();
@@ -61,6 +70,39 @@ export function clearJobsForProject(projectId: string) {
     if (job.projectId === projectId) jobs.delete(id);
   }
   subscribers.delete(projectId);
+  for (const key of liveShotReaders.keys()) {
+    if (key.startsWith(`${projectId}::`)) liveShotReaders.delete(key);
+  }
+}
+
+/**
+ * 把仍在内存轮询中的 videoId 写回 project.json。
+ * 用于修复「面板显示 queued、盘上却没有 videoId」的竞态，并在重启前保全已计费任务。
+ */
+export async function flushLiveVideoIds(projectId?: string) {
+  const flushed: { projectId: string; shotId: string; videoId: string }[] = [];
+  for (const [key, readVideoId] of liveShotReaders) {
+    const [jobProjectId, shotId] = key.split("::");
+    if (projectId && jobProjectId !== projectId) continue;
+    const videoId = readVideoId()?.trim();
+    if (!videoId) continue;
+    await mutateProject(jobProjectId, project => {
+      const shot = project.plan.find(item => item.id === shotId);
+      if (!shot) return;
+      if (!shot.videoId) {
+        shot.videoId = videoId;
+        shot.videoCreatedAt ??= now();
+      }
+      if (shot.status === "planned" || shot.status === "promptReady") {
+        shot.status = "generating";
+        shot.error = undefined;
+      }
+      const job = activeJobForShot(jobProjectId, shotId);
+      if (job) patch(job, { videoId: shot.videoId });
+      flushed.push({ projectId: jobProjectId, shotId, videoId: shot.videoId! });
+    });
+  }
+  return flushed;
 }
 
 export function getJob(jobId: string): RenderJob | undefined {
@@ -160,9 +202,11 @@ async function mergeShotState(projectId: string, shotId: string, snapshot: Proje
 
 async function run(job: RenderJob, options: StartRenderJobOptions) {
   const abort = new AbortController();
+  const key = liveKey(options.projectId, options.shotId);
   try {
     const settings = await loadSettings();
     const project = await getProject(options.projectId);
+    liveShotReaders.set(key, () => project.plan.find(item => item.id === options.shotId)?.videoId);
     const result = await generateShot({
       project,
       settings,
@@ -172,8 +216,20 @@ async function run(job: RenderJob, options: StartRenderJobOptions) {
       experimentalDuration: options.experimentalDuration,
       skillIds: options.skillIds,
       signal: abort.signal,
-      onProgress: (percent, label) => patch(job, { percent, label }),
-      persist: snapshot => mergeShotState(job.projectId, options.shotId, snapshot),
+      onProgress: (percent, label) => {
+        const shot = project.plan.find(item => item.id === options.shotId);
+        patch(job, {
+          percent,
+          label,
+          // 提交成功后立刻挂到 job 上，避免只在盘上有 videoId、面板/Agent 两边对不上
+          ...(shot?.videoId ? { videoId: shot.videoId } : {}),
+        });
+      },
+      persist: async snapshot => {
+        await mergeShotState(job.projectId, options.shotId, snapshot);
+        const shot = snapshot.plan.find(item => item.id === options.shotId);
+        if (shot?.videoId) patch(job, { videoId: shot.videoId });
+      },
     });
     patch(job, { status: "done", percent: 100, label: `${options.shotId} 生成完成`, video: result.video, videoId: result.videoId });
   } catch (error) {
@@ -181,14 +237,27 @@ async function run(job: RenderJob, options: StartRenderJobOptions) {
     // 与 generateShot 的判定保持一致：已提交但本地放弃等待 → pending，可 resume。
     const latest = await getProject(job.projectId).catch(() => undefined);
     const shot = latest?.plan.find(item => item.id === options.shotId);
-    const submitted = Boolean(shot?.videoId);
+    const memoryVideoId = liveShotReaders.get(key)?.();
+    const videoId = shot?.videoId || memoryVideoId;
+    const submitted = Boolean(videoId);
     const abandoned = submitted && /仍未完成|超时|取消|aborted/i.test(message);
+    if (videoId && !shot?.videoId) {
+      await mutateProject(job.projectId, project => {
+        const target = project.plan.find(item => item.id === options.shotId);
+        if (!target) return;
+        target.videoId = videoId;
+        target.videoCreatedAt ??= now();
+        target.status = abandoned ? "pending" : target.status;
+      }).catch(() => undefined);
+    }
     patch(job, {
       status: abandoned ? "pending" : "failed",
       label: abandoned ? "已提交，等待恢复" : "生成失败",
       error: message,
-      videoId: shot?.videoId,
+      videoId,
     });
+  } finally {
+    liveShotReaders.delete(key);
   }
 }
 

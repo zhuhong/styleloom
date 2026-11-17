@@ -164,6 +164,7 @@ Agent 在规划前 `search_skills`、命中后 `read_skill`，把 prompt fragmen
 
 - **不再随浏览器断开而中止**。以前 `AbortSignal` 来自 SSE 流，用户刷新页面就等于取消渲染；现在后台任务持有自己的 `AbortController`，与 HTTP 生命周期无关。
 - **进度不占对话气泡**。右侧「渲染」Tab 订阅 `/jobs/stream`，气泡里的 `generate_shot` 卡片只留一行「进度见右侧面板」。
+- **对话写盘必须合并渲染字段**。Agent 循环用 `saveProjectMergingRender`，保留盘上已有的 `videoId` / generating / pending / done，避免旧快照把已计费任务抹掉后误报「无平台任务」。
 - **并发写盘安全**。`store/projects.ts` 增加按项目串行化的写锁；后台任务用 `mutateProject`（读最新 → 改 → 写），且只合并该镜头的渲染字段，不会用旧快照覆盖对话轮次刚写的内容。
 - **重启可恢复**。`reconcileStaleJobs()` 在启动时把盘上遗留的 `status="generating"` 修正为 `pending`（有 `videoId`）或 `failed`（无 `videoId`），配合 `resume_shot` 接回。
 - 同一镜头在渲染中重复提交会复用同一个 job，不会并发跑两次。

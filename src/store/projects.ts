@@ -107,6 +107,76 @@ export async function saveProject(project: Project) {
 }
 
 /**
+ * 对话轮次写盘：把内存里的项目变更合并进盘上最新状态。
+ * 绝不能整份覆盖——后台 generate_shot 可能已写入 videoId / generating / done，
+ * 用对话开始时的旧快照 saveProject 会把已计费任务抹掉，Agent 就会误报「无平台任务」并二次提交。
+ */
+export async function saveProjectMergingRender(project: Project) {
+  return withProjectLock(project.id, async () => {
+    const latest = await getProject(project.id);
+    const diskById = new Map(latest.plan.map(shot => [shot.id, shot]));
+    latest.title = project.title;
+    latest.stage = project.stage;
+    latest.brief = project.brief;
+    latest.learning = project.learning;
+    latest.styleBible = project.styleBible;
+    latest.libraryPackId = project.libraryPackId;
+    latest.plan = project.plan.map(memory => {
+      const disk = diskById.get(memory.id);
+      if (!disk) return memory;
+      const next = { ...memory };
+      // 盘上已有平台任务 ID，内存没有 → 保留盘上的（含创建时间）
+      if (disk.videoId && !next.videoId) {
+        next.videoId = disk.videoId;
+        next.videoCreatedAt = next.videoCreatedAt ?? disk.videoCreatedAt;
+      }
+      if (disk.video && !next.video) next.video = disk.video;
+      const memoryIdle = next.status === "planned" || next.status === "promptReady";
+      const diskRender = disk.status === "generating" || disk.status === "pending" || disk.status === "done"
+        || (Boolean(disk.videoId) && disk.status !== "failed");
+      // 内存还停在「可提交」而盘上已进入渲染生命周期 → 跟盘上走，避免把 generating 打回 promptReady
+      if (memoryIdle && diskRender) {
+        next.status = disk.status === "promptReady" && disk.videoId ? "generating" : disk.status;
+        if (disk.error !== undefined) next.error = disk.error;
+        if (disk.updatedAt) next.updatedAt = disk.updatedAt;
+      }
+      if (disk.status === "done" && next.status !== "done") {
+        next.status = "done";
+        next.video = disk.video ?? next.video;
+        next.videoId = disk.videoId ?? next.videoId;
+        next.error = undefined;
+      }
+      if (disk.status === "pending" && memoryIdle) {
+        next.status = "pending";
+        next.error = disk.error;
+      }
+      return next;
+    });
+    const assetPaths = new Set(latest.assets.map(asset => asset.path));
+    for (const asset of project.assets) {
+      if (!assetPaths.has(asset.path)) {
+        latest.assets.push(asset);
+        assetPaths.add(asset.path);
+      }
+    }
+    if (latest.styleBible) latest.styleBible = normalizeStyleBible(latest.styleBible);
+    latest.updatedAt = nowIso();
+    await writeJson(projectFile(project.id), latest);
+    // 回写内存，让同轮后续工具看到合并后的 videoId / status
+    project.title = latest.title;
+    project.stage = latest.stage;
+    project.brief = latest.brief;
+    project.learning = latest.learning;
+    project.styleBible = latest.styleBible;
+    project.libraryPackId = latest.libraryPackId;
+    project.plan = latest.plan;
+    project.assets = latest.assets;
+    project.updatedAt = latest.updatedAt;
+    return latest;
+  });
+}
+
+/**
  * 读最新盘上状态 → 交给 mutator 修改 → 写回。
  * 后台任务用它，避免拿着旧快照覆盖对话轮次刚写的内容。
  */

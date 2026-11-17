@@ -9,7 +9,7 @@ import type { ChatAttachment, Project, SkillKind } from "./types";
 import { runAgentTurn } from "./agent/loop";
 import type { LlmMessage } from "./providers/llm";
 import { runProcess } from "./util/ffmpeg";
-import { clearJobsForProject, listJobs, reconcileStaleJobs, startResumeJob, subscribeJobs } from "./generate/jobs";
+import { clearJobsForProject, flushLiveVideoIds, listJobs, reconcileStaleJobs, startResumeJob, subscribeJobs } from "./generate/jobs";
 
 function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json; charset=utf-8" } });
@@ -292,8 +292,13 @@ const server = Bun.serve({
         if (request.method === "POST") {
           const body = (await request.json()) as { shotId?: unknown; action?: unknown };
           const shotId = typeof body.shotId === "string" ? body.shotId.trim() : "";
+          const action = typeof body.action === "string" ? body.action : "resume";
+          if (action === "flush") {
+            // 把内存轮询中的 videoId 写回盘，修复旧快照覆盖导致的「假无任务」
+            return json({ flushed: await flushLiveVideoIds(projectId) });
+          }
           if (!shotId) throw new Error("缺少 shotId");
-          if (body.action !== "resume") throw new Error(`不支持的操作：${String(body.action)}`);
+          if (action !== "resume") throw new Error(`不支持的操作：${action}`);
           const job = startResumeJob(projectId, shotId);
           return json({ job });
         }

@@ -1,6 +1,6 @@
 import { loadSettings } from "../config";
 import { chat, type LlmMessage } from "../providers/llm";
-import { getProject, readSession, saveProject, writeSession } from "../store/projects";
+import { getProject, readSession, saveProjectMergingRender, writeSession } from "../store/projects";
 import type { AgentEvent, ChatAttachment } from "../types";
 import { buildSystemPrompt } from "./prompt";
 import { executeTool, toolSpecs, type ToolContext } from "./tools";
@@ -69,7 +69,7 @@ export async function runAgentTurn(
     meta,
     save: async () => {
       if (meta.deleted) return;
-      await saveProject(project);
+      await saveProjectMergingRender(project);
     },
   };
 
@@ -131,7 +131,7 @@ export async function runAgentTurn(
           name: call.function.name,
           content: serialized.slice(0, 24_000),
         });
-        if (!meta.deleted) await saveProject(project);
+        if (!meta.deleted) await saveProjectMergingRender(project);
       }
       // 删除成功后进入下一轮，让模型用纯文本收尾，然后在上面的分支结束。
       if (meta.deleted) continue;
@@ -142,7 +142,7 @@ export async function runAgentTurn(
   } finally {
     if (!meta.deleted) {
       await writeSession(projectId, trimMessages(sanitizeMessages(messages)));
-      await saveProject(project);
+      await saveProjectMergingRender(project);
       emit({ type: "state", project });
     }
   }
