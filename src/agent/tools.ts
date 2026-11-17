@@ -5,11 +5,11 @@ import type { Settings } from "../config";
 import type { AgentEvent, PromptMode, Project, ShotPlan, ShotReferenceImage, ShotReferenceVideo, SkillKind, Stage, StyleBible } from "../types";
 import type { ToolSpec } from "../providers/llm";
 import { copyInto, ensureDir, exists, nowIso, safeJoin } from "../util/fs";
-import { addAsset, getManifest, projectDir } from "../store/projects";
+import { addAsset, deleteProject, getManifest, projectDir, renameProject } from "../store/projects";
 import { applyStylePack, listStylePacks } from "../store/library";
 import { studyReferenceVideo } from "../learn/study";
 import { resumeShot } from "../generate/shot";
-import { activeJobForShot, startRenderJob } from "../generate/jobs";
+import { activeJobForShot, clearJobsForProject, listJobs, startRenderJob } from "../generate/jobs";
 import { generateStill } from "../generate/still";
 import { stitchShots } from "../generate/stitch";
 import { H3_SAFE_MIN_SECONDS, normalizeShotDuration } from "../util/duration";
@@ -25,6 +25,8 @@ export type ToolContext = {
   emit: (event: AgentEvent) => void;
   signal: AbortSignal;
   save: () => Promise<void>;
+  /** delete_project 成功后置 true；loop 不再写回盘，也不再调后续工具。 */
+  meta: { deleted: boolean };
 };
 
 type Args = Record<string, unknown>;
@@ -437,6 +439,28 @@ export const toolSpecs: ToolSpec[] = [
       required: ["stage"],
     },
   },
+  {
+    name: "rename_project",
+    description: "重命名当前项目（只改标题，不改项目 id）。用户说改名/换标题时使用。",
+    parameters: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "新的项目标题" },
+      },
+      required: ["title"],
+    },
+  },
+  {
+    name: "delete_project",
+    description: "删除当前项目及其本地素材、对话记录，不可恢复。必须先向用户确认后果，再传 confirmed=true。有进行中的渲染任务时会拒绝。",
+    parameters: {
+      type: "object",
+      properties: {
+        confirmed: { type: "boolean", description: "用户已明确同意删除当前项目" },
+      },
+      required: ["confirmed"],
+    },
+  },
 ];
 
 async function updateBrief(ctx: ToolContext, args: Args) {
@@ -838,6 +862,44 @@ async function setStage(ctx: ToolContext, args: Args) {
   return { ok: true, stage };
 }
 
+async function renameProjectTool(ctx: ToolContext, args: Args) {
+  const title = reqString(args, "title");
+  const updated = await renameProject(ctx.project.id, title);
+  ctx.project.title = updated.title;
+  ctx.project.updatedAt = updated.updatedAt;
+  ctx.emit({ type: "state", project: ctx.project });
+  return {
+    ok: true,
+    id: ctx.project.id,
+    title: ctx.project.title,
+    note: "项目已重命名；左侧项目列表会同步更新。",
+  };
+}
+
+async function deleteProjectTool(ctx: ToolContext, args: Args) {
+  if (args.confirmed !== true) {
+    return {
+      ok: false,
+      error: "删除不可恢复。请先向用户说明会删掉本地素材与对话，取得明确同意后，再以 confirmed=true 调用。",
+    };
+  }
+  if (listJobs(ctx.project.id).some(job => job.status === "running")) {
+    return { ok: false, error: "该项目有渲染任务进行中，请等结束后再删除，或先在右侧渲染面板确认任务状态。" };
+  }
+  const id = ctx.project.id;
+  const title = ctx.project.title;
+  clearJobsForProject(id);
+  await deleteProject(id);
+  ctx.meta.deleted = true;
+  ctx.emit({ type: "project_deleted", id });
+  return {
+    ok: true,
+    id,
+    title,
+    note: "项目已删除。请告知用户可在左侧新建或选择其它项目；本轮不要再调用依赖本项目的工具。",
+  };
+}
+
 async function searchSkillsTool(_ctx: ToolContext, args: Args) {
   const kind = optString(args, "kind") as SkillKind | undefined;
   const results = await searchSkills(optString(args, "query") ?? "", {
@@ -926,6 +988,8 @@ const handlers: Record<string, (ctx: ToolContext, args: Args) => Promise<unknown
   list_style_packs: async (ctx, args) => ({ ok: true, packs: await listStylePacks(), note: "可用 apply_style_pack 套用" }),
   apply_style_pack: applyPack,
   set_stage: setStage,
+  rename_project: renameProjectTool,
+  delete_project: deleteProjectTool,
 };
 
 export async function executeTool(name: string, rawArgs: string, ctx: ToolContext) {

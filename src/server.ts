@@ -2,14 +2,14 @@ import { basename, extname, join } from "node:path";
 import { writeFile } from "node:fs/promises";
 import { dataDir, loadSettings, maskSettings, preserveSecrets, saveSettings, settingsPath, webDir, defaultSettings } from "./config";
 import { ensureDir, exists, readJsonIfExists, safeJoin, slugify, stamp } from "./util/fs";
-import { addAsset, createProject, getManifest, getProject, listProjects, projectDir, readSession, saveProject } from "./store/projects";
+import { addAsset, createProject, deleteProject, getManifest, getProject, listProjects, projectDir, readSession, renameProject, saveProject } from "./store/projects";
 import { listStylePacks } from "./store/library";
 import { getSkill, listSkills, searchSkills, skillEvidenceFile, skillToMarkdown, skillToSummary } from "./store/skills";
 import type { ChatAttachment, Project, SkillKind } from "./types";
 import { runAgentTurn } from "./agent/loop";
 import type { LlmMessage } from "./providers/llm";
 import { runProcess } from "./util/ffmpeg";
-import { listJobs, reconcileStaleJobs, startResumeJob, subscribeJobs } from "./generate/jobs";
+import { clearJobsForProject, listJobs, reconcileStaleJobs, startResumeJob, subscribeJobs } from "./generate/jobs";
 
 function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json; charset=utf-8" } });
@@ -319,6 +319,23 @@ const server = Bun.serve({
           if (activeProjects.has(projectId)) return json({ error: "该项目正在进行一轮对话，请等当前任务结束" }, 409);
           activeProjects.add(projectId);
           return chatStream(projectId, message, attachments);
+        }
+        if (request.method === "PATCH") {
+          const body = (await request.json()) as { title?: unknown };
+          const title = typeof body.title === "string" ? body.title : "";
+          return json({ project: await renameProject(projectId, title) });
+        }
+        if (request.method === "DELETE") {
+          if (activeProjects.has(projectId)) {
+            return json({ error: "该项目正在对话中，请等当前任务结束后再删除" }, 409);
+          }
+          const running = listJobs(projectId).some(job => job.status === "running");
+          if (running) {
+            return json({ error: "该项目有渲染任务进行中，请等结束后再删除" }, 409);
+          }
+          clearJobsForProject(projectId);
+          await deleteProject(projectId);
+          return json({ ok: true, id: projectId });
         }
         if (request.method !== "GET") return json({ error: "Method not allowed" }, 405);
         const project = await getProject(projectId);

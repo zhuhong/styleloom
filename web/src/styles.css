@@ -65,12 +65,53 @@ code { background: #1f2733; padding: 1px 5px; border-radius: 5px; font-size: 12p
 .iconButton { background: transparent; border: 1px solid var(--line); border-radius: 8px; width: 26px; height: 26px; line-height: 1; color: var(--text); }
 .iconButton:hover { border-color: var(--accent); color: var(--accent); }
 .projectList { display: flex; flex-direction: column; gap: 6px; }
-.projectItem { text-align: left; background: transparent; border: 1px solid transparent; border-radius: 10px; padding: 9px 10px; }
+.projectItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 6px 6px 6px 4px;
+}
 .projectItem:hover { background: var(--panel2); }
 .projectItem.active { background: var(--panel2); border-color: #2f3b4b; }
+.projectMain {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 3px 4px;
+  color: inherit;
+}
 .projectItem strong { display: block; font-weight: 500; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .projectItem span { display: block; color: var(--muted); font-size: 11px; }
 .projectItem .projectTimes { margin-top: 2px; font-size: 10px; opacity: 0.9; }
+.projectActions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.projectItem:hover .projectActions,
+.projectItem.active .projectActions,
+.projectItem:focus-within .projectActions { opacity: 1; }
+.projectAction {
+  width: 22px;
+  height: 22px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  padding: 0;
+}
+.projectAction:hover { border-color: var(--line); color: var(--text); background: rgba(255, 255, 255, 0.04); }
+.projectAction.danger:hover { border-color: #5b2626; color: var(--danger); background: rgba(248, 113, 113, 0.08); }
 .packList { display: flex; flex-direction: column; gap: 6px; }
 .packItem { border: 1px solid var(--line); border-radius: 9px; padding: 8px; font-size: 12px; color: var(--muted); }
 .packItem strong { color: var(--text); font-weight: 500; display: block; font-size: 12px; }

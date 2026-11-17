@@ -317,10 +317,32 @@ export function App() {
       scheduleRefresh();
       return;
     }
+    if (event.type === "project_deleted") {
+      const deletedId = String(event.id ?? "");
+      void loadProjects().then(async list => {
+        if (projectRef.current?.id === deletedId) {
+          clearPendingUploads();
+          setMedia(null);
+          setInspectorTab(null);
+          setAssetFilter("all");
+          setSkillFilter("all");
+          setShowAllSkills(false);
+          if (list.length) await selectProject(list[0].id);
+          else {
+            setProject(null);
+            setShots([]);
+            setChatItems([]);
+            setJobs([]);
+            connectJobs(null);
+          }
+        }
+      }).catch(error => pushError(t("errors.deleteProject", { message: (error as Error).message })));
+      return;
+    }
     if (event.type === "error") {
       pushError(t("errors.generic", { message: String(event.message ?? "") }));
     }
-  }, [pushBubble, pushError, scheduleRefresh]);
+  }, [clearPendingUploads, connectJobs, loadProjects, pushBubble, pushError, scheduleRefresh, selectProject]);
 
   const sendMessage = useCallback(async (message: string, attachments: ChatAttachment[] = []) => {
     const current = projectRef.current;
@@ -457,6 +479,54 @@ export function App() {
     }
   }, [loadProjects, pushError, selectProject]);
 
+  const clearWorkspace = useCallback(() => {
+    setMedia(null);
+    clearPendingUploads();
+    setInspectorTab(null);
+    setAssetFilter("all");
+    setSkillFilter("all");
+    setShowAllSkills(false);
+    setProject(null);
+    setShots([]);
+    setChatItems([]);
+    setJobs([]);
+    connectJobs(null);
+  }, [clearPendingUploads, connectJobs]);
+
+  const handleRenameProject = useCallback(async (id: string, currentTitle: string) => {
+    const title = window.prompt(t("nav.renamePromptTitle"), currentTitle);
+    if (title === null) return;
+    const nextTitle = title.trim();
+    if (!nextTitle || nextTitle === currentTitle) return;
+    try {
+      const data = await api<{ project: Project }>(`/api/projects/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ title: nextTitle }),
+      });
+      await loadProjects();
+      if (projectRef.current?.id === id) {
+        setProject(current => (current ? { ...current, title: data.project.title, updatedAt: data.project.updatedAt } : current));
+      }
+    } catch (error) {
+      pushError(t("errors.renameProject", { message: (error as Error).message }));
+    }
+  }, [loadProjects, pushError]);
+
+  const handleDeleteProject = useCallback(async (id: string, title: string) => {
+    if (!window.confirm(t("nav.deleteConfirm", { title }))) return;
+    const wasCurrent = projectRef.current?.id === id;
+    try {
+      await api(`/api/projects/${encodeURIComponent(id)}`, { method: "DELETE" });
+      const list = await loadProjects();
+      if (wasCurrent) {
+        if (list.length) await selectProject(list[0].id);
+        else clearWorkspace();
+      }
+    } catch (error) {
+      pushError(t("errors.deleteProject", { message: (error as Error).message }));
+    }
+  }, [clearWorkspace, loadProjects, pushError, selectProject]);
+
   const handleResumeShot = useCallback(async (shotId: string) => {
     const current = projectRef.current;
     if (!current || !shotId) return;
@@ -534,6 +604,8 @@ export function App() {
             currentProjectId={project?.id ?? null}
             onSelectProject={id => void selectProject(id)}
             onNewProject={() => void handleNewProject()}
+            onRenameProject={(id, title) => void handleRenameProject(id, title)}
+            onDeleteProject={(id, title) => void handleDeleteProject(id, title)}
           />
         </aside>
 

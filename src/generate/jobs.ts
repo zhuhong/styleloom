@@ -55,6 +55,14 @@ export function listJobs(projectId: string): RenderJob[] {
     .sort((left, right) => right.startedAt.localeCompare(left.startedAt));
 }
 
+/** 项目删除时清掉内存任务与订阅，避免幽灵进度。 */
+export function clearJobsForProject(projectId: string) {
+  for (const [id, job] of jobs) {
+    if (job.projectId === projectId) jobs.delete(id);
+  }
+  subscribers.delete(projectId);
+}
+
 export function getJob(jobId: string): RenderJob | undefined {
   return jobs.get(jobId);
 }

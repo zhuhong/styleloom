@@ -60,12 +60,15 @@ export async function runAgentTurn(
   messages.push({ role: "user", content: userMessage, ...(attachments.length ? { attachments } : {}) });
   emit({ type: "message", role: "user", content: userMessage, ...(attachments.length ? { attachments } : {}) });
 
+  const meta = { deleted: false };
   const ctx: ToolContext = {
     project,
     settings,
     emit,
     signal,
+    meta,
     save: async () => {
+      if (meta.deleted) return;
       await saveProject(project);
     },
   };
@@ -83,18 +86,20 @@ export async function runAgentTurn(
             return { ...rest, content: `${content}${content ? "\n\n" : ""}${attachmentBlock(attachments)}` };
           }),
         ],
-        tools: toolSpecs,
+        // 项目已删：只允许收尾文本，不再暴露会写盘的工具。
+        tools: meta.deleted ? undefined : toolSpecs,
         signal,
       });
       const content = result.content.trim();
       if (content) emit({ type: "message", role: "assistant", content });
-      if (!result.toolCalls.length) {
+      if (!result.toolCalls.length || meta.deleted) {
         messages.push({ role: "assistant", content });
         break;
       }
       messages.push({ role: "assistant", content, tool_calls: result.toolCalls });
       for (const call of result.toolCalls) {
         signal.throwIfAborted();
+        if (meta.deleted) break;
         const callId = call.id || crypto.randomUUID();
         let parsedArgs: unknown = call.function.arguments;
         try {
@@ -126,15 +131,19 @@ export async function runAgentTurn(
           name: call.function.name,
           content: serialized.slice(0, 24_000),
         });
-        await saveProject(project);
+        if (!meta.deleted) await saveProject(project);
       }
+      // 删除成功后进入下一轮，让模型用纯文本收尾，然后在上面的分支结束。
+      if (meta.deleted) continue;
       if (step === MAX_STEPS - 1) {
         emit({ type: "message", role: "assistant", content: "本轮工具调用次数已达上限，我先停在这里。请告诉我下一步。" });
       }
     }
   } finally {
-    await writeSession(projectId, trimMessages(sanitizeMessages(messages)));
-    await saveProject(project);
-    emit({ type: "state", project });
+    if (!meta.deleted) {
+      await writeSession(projectId, trimMessages(sanitizeMessages(messages)));
+      await saveProject(project);
+      emit({ type: "state", project });
+    }
   }
 }

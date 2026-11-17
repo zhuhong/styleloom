@@ -8,6 +8,8 @@ type SidebarProps = {
   currentProjectId: string | null;
   onSelectProject: (id: string) => void;
   onNewProject: () => void;
+  onRenameProject: (id: string, currentTitle: string) => void;
+  onDeleteProject: (id: string, title: string) => void;
 };
 
 export function Sidebar({
@@ -16,6 +18,8 @@ export function Sidebar({
   currentProjectId,
   onSelectProject,
   onNewProject,
+  onRenameProject,
+  onDeleteProject,
 }: SidebarProps) {
   // API 已按 updatedAt → createdAt 逆序；这里再排一次，避免前端本地插入后乱序。
   const orderedProjects = projects.slice().sort((left, right) => {
@@ -45,26 +49,56 @@ export function Sidebar({
           </p>
         ) : (
           orderedProjects.map((project) => (
-            <button
+            <div
               key={project.id}
-              type="button"
               class={`projectItem ${currentProjectId === project.id ? "active" : ""}`}
-              onClick={() => onSelectProject(project.id)}
             >
-              <strong>{project.title}</strong>
-              <span>
-                {t("misc.projectMeta", {
-                  stage: stageLabel(project.stage),
-                  count: project.shotCount,
-                  learning: learningLabel(project.learning),
-                })}
-              </span>
-              <span class="projectTimes">
-                {t("nav.projectCreated", { time: formatUpdatedAt(project.createdAt) })}
-                {" · "}
-                {t("nav.projectUpdated", { time: formatUpdatedAt(project.updatedAt) })}
-              </span>
-            </button>
+              <button
+                type="button"
+                class="projectMain"
+                onClick={() => onSelectProject(project.id)}
+              >
+                <strong>{project.title}</strong>
+                <span>
+                  {t("misc.projectMeta", {
+                    stage: stageLabel(project.stage),
+                    count: project.shotCount,
+                    learning: learningLabel(project.learning),
+                  })}
+                </span>
+                <span class="projectTimes">
+                  {t("nav.projectCreated", { time: formatUpdatedAt(project.createdAt) })}
+                  {" · "}
+                  {t("nav.projectUpdated", { time: formatUpdatedAt(project.updatedAt) })}
+                </span>
+              </button>
+              <div class="projectActions">
+                <button
+                  type="button"
+                  class="projectAction"
+                  title={t("nav.renameProject")}
+                  aria-label={t("nav.renameProject")}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onRenameProject(project.id, project.title);
+                  }}
+                >
+                  ✎
+                </button>
+                <button
+                  type="button"
+                  class="projectAction danger"
+                  title={t("nav.deleteProject")}
+                  aria-label={t("nav.deleteProject")}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onDeleteProject(project.id, project.title);
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            </div>
           ))
         )}
       </div>

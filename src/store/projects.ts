@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { dataDir } from "../config";
 import type { AssetRecord, LearningState, Project, ProjectSummary, SliceManifest } from "../types";
 import { normalizeStyleBible } from "../learn/bible";
-import { exists, ensureDir, listDirs, nowIso, readJsonIfExists, slugify, writeJson } from "../util/fs";
+import { exists, ensureDir, listDirs, nowIso, readJsonIfExists, removeDir, slugify, writeJson } from "../util/fs";
 
 export function projectsDir() {
   return join(dataDir, "projects");
@@ -137,6 +137,28 @@ export function addAsset(project: Project, asset: Omit<AssetRecord, "id" | "crea
 
 export async function projectExists(id: string) {
   return exists(projectFile(id));
+}
+
+/** 只改标题，不改目录 id（引用/会话路径保持稳定）。 */
+export async function renameProject(id: string, title: string): Promise<Project> {
+  const cleanTitle = title.trim();
+  if (!cleanTitle) throw new Error("项目名称不能为空");
+  return mutateProject(id, project => {
+    project.title = cleanTitle;
+    return project;
+  });
+}
+
+/**
+ * 删除整个项目目录。
+ * 技能/风格包在 data/skills、data/library，不随项目删；调用方需先清内存里的渲染任务。
+ */
+export async function deleteProject(id: string): Promise<void> {
+  await getProject(id);
+  await withProjectLock(id, async () => {
+    await removeDir(projectDir(id));
+  });
+  projectLocks.delete(id);
 }
 
 export async function readSession<T>(id: string): Promise<T[]> {

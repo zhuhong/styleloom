@@ -270,6 +270,7 @@ export type AgentEvent =
   | { type: "tool_end"; id: string; name: string; ok: boolean; preview: string; elapsedMs: number }
   | { type: "progress"; scope: string; percent: number; label: string }
   | { type: "state"; project: Project }
+  | { type: "project_deleted"; id: string }
   | { type: "error"; message: string }
   | { type: "ping" }
   | { type: "done" };

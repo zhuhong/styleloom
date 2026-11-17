@@ -231,6 +231,8 @@ planned → promptReady → generating → done
 | `list_style_packs` | 查看风格包 | 无 |
 | `apply_style_pack` | 套用风格包并复制引用素材 | 无 |
 | `set_stage` | 更新阶段 | 无 |
+| `rename_project` | 重命名当前项目标题 | 无 |
+| `delete_project` | 删除当前项目（需 `confirmed=true`） | 无 |
 
 ## 扩展点
 
