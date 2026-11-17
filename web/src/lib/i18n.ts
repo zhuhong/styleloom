@@ -1,10 +1,13 @@
-// 极简前端国际化：字典 + 静态文案刷新 + 语言订阅。
+// 极简前端国际化：字典 + 语言订阅。
 // ACT: 语言只存 localStorage，不同步服务端；换设备需要各自选择一次。
 const STORAGE_KEY = "styleloom.lang";
 
-export const LANGS = ["zh", "en"];
+export const LANGS = ["zh", "en"] as const;
+export type Lang = (typeof LANGS)[number];
 
-const dictionaries = {
+type Dict = Record<string, string>;
+
+const dictionaries: Record<Lang, Dict> = {
   zh: {
     "app.title": "StyleLoom · 视频学习与生成 Agent",
     "app.tagline": "从参考片学习，再用 MiniMax H3 生成",
@@ -520,10 +523,10 @@ const dictionaries = {
   },
 };
 
-let current = "zh";
-const listeners = new Set();
+let current: Lang = "zh";
+const listeners = new Set<(lang: Lang) => void>();
 
-function normalizeLang(value) {
+function normalizeLang(value: unknown): Lang | null {
   const text = String(value ?? "").trim().toLowerCase();
   if (text.startsWith("en")) return "en";
   if (text.startsWith("zh")) return "zh";
@@ -547,7 +550,7 @@ export function getLang() {
   return current;
 }
 
-export function setLang(lang) {
+export function setLang(lang: unknown) {
   const next = normalizeLang(lang);
   if (!next) return current;
   current = next;
@@ -575,7 +578,7 @@ export function initLang() {
   return current;
 }
 
-export function t(key, vars) {
+export function t(key: string, vars?: Record<string, unknown>) {
   const dict = dictionaries[current] || dictionaries.zh;
   // 英文单复数：可选 key#one 覆盖，count 为 1 时优先使用（中文不需要，直接省略）。
   const singular = vars && Number(vars.count) === 1 ? `${key}#one` : null;
@@ -584,28 +587,10 @@ export function t(key, vars) {
   if (template == null) template = dictionaries.zh[key];
   if (template == null) return key;
   if (!vars) return template;
-  return String(template).replace(/\{(\w+)\}/g, (match, name) => (name in vars ? String(vars[name]) : match));
+  return String(template).replace(/\{(\w+)\}/g, (match, name: string) => (name in vars ? String(vars[name]) : match));
 }
 
-export function applyStatic(root = document) {
-  for (const node of root.querySelectorAll("[data-i18n]")) {
-    node.textContent = t(node.dataset.i18n);
-  }
-  for (const node of root.querySelectorAll("[data-i18n-html]")) {
-    node.innerHTML = t(node.dataset.i18nHtml);
-  }
-  for (const node of root.querySelectorAll("[data-i18n-placeholder]")) {
-    node.setAttribute("placeholder", t(node.dataset.i18nPlaceholder));
-  }
-  for (const node of root.querySelectorAll("[data-i18n-title]")) {
-    node.setAttribute("title", t(node.dataset.i18nTitle));
-  }
-  for (const node of root.querySelectorAll("[data-i18n-aria-label]")) {
-    node.setAttribute("aria-label", t(node.dataset.i18nAriaLabel));
-  }
-}
-
-export function subscribeLang(fn) {
+export function subscribeLang(fn: (lang: Lang) => void) {
   listeners.add(fn);
   return () => listeners.delete(fn);
 }

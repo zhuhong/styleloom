@@ -1,0 +1,222 @@
+export type ChatAttachment = {
+  path: string;
+  label?: string;
+  kind?: "image" | "video";
+  mimeType?: string;
+  size?: number;
+};
+
+export type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+  attachments?: ChatAttachment[];
+};
+
+export type ProjectSummary = {
+  id: string;
+  title: string;
+  stage: string;
+  shotCount: number;
+  learning: string;
+  updatedAt?: string;
+};
+
+export type StylePackSummary = {
+  id: string;
+  title: string;
+  summary: string;
+  characters: string[];
+  shotCount: number;
+};
+
+export type SkillSummary = {
+  id: string;
+  name: string;
+  kind: string;
+  status: string;
+  confidence: number;
+  summaryZh: string;
+  instruction?: string;
+  promptFragment?: string;
+  applicableWhen?: string[];
+  images?: string[];
+  evidenceCount: number;
+  used: number;
+  good: number;
+  mixed: number;
+  bad: number;
+};
+
+export type LearningState = {
+  status: string;
+  warning?: string;
+  error?: string;
+  shotCount?: number;
+  sourceDuration?: number;
+  sourceWidth?: number;
+  sourceHeight?: number;
+};
+
+export type Brief = {
+  idea?: string;
+  genre?: string;
+  aspectRatio?: string;
+  durationSeconds?: number;
+  mustKeep?: string[];
+  avoid?: string[];
+};
+
+export type BibleEntity = {
+  id: string;
+  name: string;
+  descriptionZh: string;
+  stillImages?: string[];
+};
+
+export type CameraMove = {
+  name: string;
+  descriptionZh?: string;
+  promptFragment?: string;
+};
+
+export type StyleBible = {
+  summary: string;
+  characters?: BibleEntity[];
+  locations?: BibleEntity[];
+  cameraGrammar?: CameraMove[];
+  rhythm?: { averageShotSeconds?: number | string };
+  style?: { stylePrefix?: string };
+};
+
+export type AssetRecord = {
+  kind: string;
+  path: string;
+  label: string;
+  meta?: Record<string, unknown>;
+};
+
+export type PlanShot = {
+  id: string;
+  title: string;
+  action?: string;
+  durationSeconds: number;
+  status: string;
+  video?: string;
+  prompt?: string;
+  promptMode?: string;
+  error?: string;
+};
+
+export type Project = {
+  id: string;
+  title: string;
+  stage: string;
+  updatedAt: string;
+  brief?: Brief;
+  learning?: LearningState;
+  styleBible?: StyleBible | null;
+  plan?: PlanShot[];
+  assets?: AssetRecord[];
+};
+
+export type ReferenceShot = {
+  id: string;
+  start: number;
+  end: number;
+  duration: number;
+  keyframe: string;
+  clip?: string;
+  shotSize?: string;
+  movement?: string;
+  description?: string;
+};
+
+export type RenderJob = {
+  id: string;
+  shotId: string;
+  status: string;
+  percent?: number;
+  label?: string;
+  startedAt?: string;
+  videoId?: string;
+  video?: string;
+  error?: string;
+};
+
+export type PendingUpload = {
+  file: File;
+  kind: "image" | "video";
+  previewUrl: string;
+  status: "uploading" | "done" | "error";
+  error?: string;
+  asset?: AssetRecord;
+  mimeType?: string;
+  size?: number;
+};
+
+export type ToolCardState = {
+  id: string;
+  name: string;
+  args: unknown;
+  status: "running" | "done" | "failed";
+  percent: number;
+  label: string;
+  panel: boolean;
+  startedAt: number;
+  elapsedMs?: number;
+  preview?: string;
+};
+
+export type ChatItem =
+  | {
+      kind: "bubble";
+      id: string;
+      role: "user" | "assistant";
+      content: string;
+      isError?: boolean;
+      attachments?: ChatAttachment[];
+    }
+  | {
+      kind: "tool";
+      id: string;
+      card: ToolCardState;
+    };
+
+export type MediaRequest = {
+  src: string;
+  type?: string;
+  title?: string;
+  openUrl?: string;
+};
+
+export type InspectorTab = "overview" | "shots" | "jobs" | "assets" | "skills";
+
+export type AppSettings = Record<string, unknown> & {
+  llm?: {
+    baseUrl?: string;
+    apiKey?: string;
+    model?: string;
+    visionModel?: string;
+  };
+  video?: {
+    provider?: string;
+    baseUrl?: string;
+    apiKey?: string;
+    model?: string;
+    referenceModel?: string;
+    local?: {
+      baseUrl?: string;
+      token?: string;
+      shortEdge?: number | string;
+    };
+  };
+  image?: {
+    api?: string;
+    baseUrl?: string;
+    apiKey?: string;
+    model?: string;
+    size?: string;
+    local?: Record<string, unknown>;
+  };
+  xhs?: Record<string, unknown>;
+};

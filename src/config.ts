@@ -76,7 +76,8 @@ export type Settings = {
 };
 
 export const appRoot = resolve(import.meta.dir, "..");
-export const webDir = join(appRoot, "web");
+/** 前端 Vite 构建产物；`bun run build:web` 生成。 */
+export const webDir = join(appRoot, "web", "dist");
 export const dataDir = process.env.VIDEOCOPY_DATA ? resolve(process.env.VIDEOCOPY_DATA) : join(appRoot, "data");
 export const settingsPath = join(dataDir, "settings.json");
 

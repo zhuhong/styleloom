@@ -33,7 +33,7 @@ Deployment (data layout, reverse proxy, backup, troubleshooting) is covered in [
 - Paths stored in project state are **project-relative POSIX paths**, read and written through `safeJoin`.
 - Overwrites use atomic helpers (`writeJson` / `writeText`).
 - Mark deliberate simplifications and known ceilings with `ACT:` comments.
-- `web/` talks to the backend only through `/api`, `/files` and `/skill-files`.
+- `web/` is a Preact + Vite app; talk to the backend only through `/api`, `/files` and `/skill-files`. Run `bun run build:web` before `bun start`, or use `bun run dev:web` while developing the UI.
 
 ## Adding a tool
 

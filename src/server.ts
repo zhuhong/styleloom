@@ -54,10 +54,23 @@ function normalizeChatAttachments(value: unknown, project: Project): ChatAttachm
 }
 
 async function serveStatic(pathname: string) {
+  if (!(await exists(webDir))) {
+    return new Response(
+      "前端尚未构建。请先运行：bun run build:web\n开发时可另开终端：bun run dev:web（Vite 代理到本服务）\n",
+      { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } },
+    );
+  }
   const relative = pathname === "/" ? "index.html" : decodeURIComponent(pathname.slice(1));
-  const file = safeJoin(webDir, relative);
-  if (!(await exists(file))) return new Response("Not found", { status: 404 });
-  return new Response(Bun.file(file));
+  try {
+    const file = safeJoin(webDir, relative);
+    if (await exists(file)) return new Response(Bun.file(file));
+  } catch {
+    // 路径越界或非法 → 回退到 SPA index
+  }
+  // SPA：未知路径回退 index.html，方便以后加前端路由。
+  const index = safeJoin(webDir, "index.html");
+  if (await exists(index)) return new Response(Bun.file(index));
+  return new Response("Not found", { status: 404 });
 }
 
 async function serveProjectFile(projectId: string, relative: string) {

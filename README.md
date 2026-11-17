@@ -56,12 +56,13 @@ Requirements: macOS or Linux (Windows untested), [Bun](https://bun.sh) 1.3+, `ff
 git clone https://github.com/zhuhong/styleloom.git
 cd styleloom
 bun install
+bun run build:web
 mkdir -p data && cp settings.example.json data/settings.json
 # edit data/settings.json — at minimum an LLM endpoint and an icompify key
 bun start            # http://127.0.0.1:8787
 ```
 
-`bun run chat` opens the terminal client. `bun run typecheck` is the sanity check.
+Frontend is Preact + Vite (`web/`). For UI work: `bun start` in one terminal and `bun run dev:web` in another (Vite on `:5173`, proxies `/api`). `bun run chat` opens the terminal client. `bun run typecheck` is the sanity check.
 
 Then fill in `data/settings.json` (or use the in-app **Settings** dialog):
 
@@ -107,7 +108,7 @@ src/
 ├── providers/     llm / image / video / download — protocol only
 ├── store/         projects, manifests, sessions, style packs, skills
 └── util/          fs, ffmpeg, ssh, duration
-web/               dependency-free HTML/CSS/JS front end
+web/               Preact + Vite front end (build → web/dist)
 skills/            public read-only skill library
 docs/              deploy, local GPU, skills, xhs, H3 prompting, examples
 ```

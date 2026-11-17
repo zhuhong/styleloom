@@ -1,3 +1,4 @@
+// @ts-nocheck
 // 轻量 Markdown 渲染器：只生成受控 HTML，原始 HTML 一律转义，不执行脚本。
 const PLACEHOLDER_OPEN = "\uE000";
 const PLACEHOLDER_CLOSE = "\uE001";

@@ -38,10 +38,12 @@ Linux 用发行版包管理器装 `ffmpeg`，`bun` 与 `yt-dlp` 按官方脚本�
 git clone https://github.com/zhuhong/styleloom.git
 cd styleloom
 bun install
+bun run build:web   # Preact 前端 → web/dist（bun start 托管的是构建产物）
 
 # 首次启动会自动创建 data/settings.json（内容是默认值）
 bun start
 # 打开 http://127.0.0.1:8787 → 右上「设置」填模型配置
+# 改 UI 时另开：bun run dev:web（Vite :5173，代理 /api）
 ```
 
 也可以直接改文件：

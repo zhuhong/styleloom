@@ -56,12 +56,13 @@
 git clone https://github.com/zhuhong/styleloom.git
 cd styleloom
 bun install
+bun run build:web
 mkdir -p data && cp settings.example.json data/settings.json
 # 编辑 data/settings.json —— 至少填 LLM 地址和 icompify Key
 bun start            # http://127.0.0.1:8787
 ```
 
-`bun run chat` 打开终端客户端，`bun run typecheck` 做类型检查。
+前端是 Preact + Vite（`web/`）。改 UI 时：一个终端 `bun start`，另一个 `bun run dev:web`（Vite `:5173`，代理 `/api`）。`bun run chat` 打开终端客户端，`bun run typecheck` 做类型检查。
 
 然后在 `data/settings.json`（或网页「设置」）里填：
 
@@ -107,7 +108,7 @@ src/
 ├── providers/     llm / image / video / download，只做协议转换
 ├── store/         项目、manifest、会话、风格包、技能
 └── util/          文件、ffmpeg、ssh、时长
-web/               无构建步骤的原生前端
+web/               Preact + Vite 前端（构建产物 web/dist）
 skills/            公开只读技能库
 docs/              部署、本地 GPU、技能、小红书、H3 提示词、示例
 ```

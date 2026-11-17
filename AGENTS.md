@@ -4,17 +4,20 @@
 
 ## 技术栈
 
-- Bun + TypeScript，ES Modules，无运行时第三方依赖。
-- 前端是原生 HTML/CSS/JS，**不引入打包器**，`web/` 直接由 `src/server.ts` 静态托管。
+- Bun + TypeScript，ES Modules；后端无运行时第三方依赖。
+- 前端是 **Preact + Vite**（`web/`），构建产物在 `web/dist/`，由 `src/server.ts` 静态托管。
 - `ffmpeg` / `ffprobe` 通过 `Bun.spawn` 调用。
 
 ## 常用命令
 
 ```bash
-bun install
+bun install                 # 根目录 + web/ 依赖（postinstall）
+bun run build:web           # 构建前端到 web/dist
 bun run typecheck
-bun start            # http://127.0.0.1:8787
-bun run chat         # 终端对话
+bun start                   # http://127.0.0.1:8787（需先 build:web）
+bun run dev                 # 后端热重载
+bun run dev:web             # Vite 开发服 http://127.0.0.1:5173（代理 /api）
+bun run chat                # 终端对话
 ```
 
 ## 目录边界
@@ -26,7 +29,7 @@ bun run chat         # 终端对话
 - `src/store/`：项目、manifest、会话、风格包、全局技能持久化。
 - `src/util/`：文件与 ffmpeg 原语。
 - `src/providers/download/`：外部素材下载适配器（小红书/yt-dlp）。
-- `web/`：只通过 `/api`、`/files`、`/skill-files` 访问后端。
+- `web/`：Preact 源码；只通过 `/api`、`/files`、`/skill-files` 访问后端。生产静态资源来自 `web/dist/`。
 
 ## 代码约定
 
@@ -62,7 +65,7 @@ bun run chat         # 终端对话
 - `SliceManifest`（`learning/slice.json`）：镜头时间、关键帧、采样、片段、`annotation`。
 - `StyleBible`：`style`、`characters`、`locations`、`cameraGrammar`、`rhythm`、`prompting`、`sound`。
 - `Skill`：`kind`、`status`、`instruction`、`promptFragment`、`evidence`、`outcomes`、`confidence`、`version`。
-- 改动这些结构时，同步更新 `src/types.ts`、`ARCHITECTURE.md`、`web/app.js` 的渲染。
+- 改动这些结构时，同步更新 `src/types.ts`、`ARCHITECTURE.md`、`web/src/` 的渲染。
 
 ## 工具新增流程
 
