@@ -33,11 +33,17 @@ export async function listProjects(): Promise<ProjectSummary[]> {
   const projects = await Promise.all(ids.map(id => readJsonIfExists<Project>(projectFile(id))));
   return projects
     .filter((project): project is Project => Boolean(project))
-    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+    // 先按最后更新时间逆序，相同时再按创建时间逆序。
+    .sort((left, right) => {
+      const byUpdated = right.updatedAt.localeCompare(left.updatedAt);
+      if (byUpdated) return byUpdated;
+      return right.createdAt.localeCompare(left.createdAt);
+    })
     .map(project => ({
       id: project.id,
       title: project.title,
       stage: project.stage,
+      createdAt: project.createdAt,
       updatedAt: project.updatedAt,
       shotCount: project.plan.length,
       learning: project.learning.status,

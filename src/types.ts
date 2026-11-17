@@ -257,6 +257,7 @@ export type ProjectSummary = {
   id: string;
   title: string;
   stage: Stage;
+  createdAt: string;
   updatedAt: string;
   shotCount: number;
   learning: LearningStatus;

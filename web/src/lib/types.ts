@@ -18,6 +18,7 @@ export type ProjectSummary = {
   stage: string;
   shotCount: number;
   learning: string;
+  createdAt?: string;
   updatedAt?: string;
 };
 

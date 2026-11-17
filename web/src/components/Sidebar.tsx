@@ -1,5 +1,5 @@
 import type { ProjectSummary, StylePackSummary } from "../lib/types";
-import { learningLabel, stageLabel } from "../lib/utils";
+import { formatUpdatedAt, learningLabel, stageLabel } from "../lib/utils";
 import { t } from "../lib/i18n";
 
 type SidebarProps = {
@@ -17,6 +17,13 @@ export function Sidebar({
   onSelectProject,
   onNewProject,
 }: SidebarProps) {
+  // API 已按 updatedAt → createdAt 逆序；这里再排一次，避免前端本地插入后乱序。
+  const orderedProjects = projects.slice().sort((left, right) => {
+    const byUpdated = String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? ""));
+    if (byUpdated) return byUpdated;
+    return String(right.createdAt ?? "").localeCompare(String(left.createdAt ?? ""));
+  });
+
   return (
     <>
       <div class="sideHeader">
@@ -32,12 +39,12 @@ export function Sidebar({
         </button>
       </div>
       <div id="projectList" class="projectList">
-        {!projects.length ? (
+        {!orderedProjects.length ? (
           <p class="muted" style="font-size:12px;padding:0 6px">
             {t("nav.noProjects")}
           </p>
         ) : (
-          projects.map((project) => (
+          orderedProjects.map((project) => (
             <button
               key={project.id}
               type="button"
@@ -51,6 +58,11 @@ export function Sidebar({
                   count: project.shotCount,
                   learning: learningLabel(project.learning),
                 })}
+              </span>
+              <span class="projectTimes">
+                {t("nav.projectCreated", { time: formatUpdatedAt(project.createdAt) })}
+                {" · "}
+                {t("nav.projectUpdated", { time: formatUpdatedAt(project.updatedAt) })}
               </span>
             </button>
           ))

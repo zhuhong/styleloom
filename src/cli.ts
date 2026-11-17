@@ -25,7 +25,16 @@ if (!projects.length) {
   const title = (await rl.question("还没有项目，输入项目名创建：")).trim() || "我的第一个视频";
   const project = await createProject(title);
   console.log(`已创建项目：${project.id}`);
-  projects.push({ id: project.id, title: project.title, stage: project.stage, updatedAt: project.updatedAt, shotCount: 0, learning: "none", hasBible: false });
+  projects.push({
+    id: project.id,
+    title: project.title,
+    stage: project.stage,
+    createdAt: project.createdAt,
+    updatedAt: project.updatedAt,
+    shotCount: 0,
+    learning: "none",
+    hasBible: false,
+  });
 }
 console.log("\n项目列表：");
 projects.forEach((project, index) => console.log(`  ${index + 1}. ${project.title}（${project.id}）`));

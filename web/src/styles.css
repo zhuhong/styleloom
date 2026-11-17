@@ -69,7 +69,8 @@ code { background: #1f2733; padding: 1px 5px; border-radius: 5px; font-size: 12p
 .projectItem:hover { background: var(--panel2); }
 .projectItem.active { background: var(--panel2); border-color: #2f3b4b; }
 .projectItem strong { display: block; font-weight: 500; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.projectItem span { color: var(--muted); font-size: 11px; }
+.projectItem span { display: block; color: var(--muted); font-size: 11px; }
+.projectItem .projectTimes { margin-top: 2px; font-size: 10px; opacity: 0.9; }
 .packList { display: flex; flex-direction: column; gap: 6px; }
 .packItem { border: 1px solid var(--line); border-radius: 9px; padding: 8px; font-size: 12px; color: var(--muted); }
 .packItem strong { color: var(--text); font-weight: 500; display: block; font-size: 12px; }

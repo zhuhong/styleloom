@@ -24,6 +24,8 @@ const dictionaries: Record<Lang, Dict> = {
     "nav.noPacks": "学习参考片后自动生成",
     "nav.packHint": "对 Agent 说：套用风格包 {id}",
     "nav.noCharacters": "无角色",
+    "nav.projectCreated": "创建 {time}",
+    "nav.projectUpdated": "更新 {time}",
 
     "chat.emptyTitle": "先给一个参考片，或者直接说想法",
     "chat.emptyExample": "例：学习 <code>/Users/you/Movies/reference.mp4</code> 的运镜和光线，做一个 8 秒的雨夜街头镜头。",
@@ -278,6 +280,8 @@ const dictionaries: Record<Lang, Dict> = {
     "nav.noPacks": "Created automatically after studying a reference",
     "nav.packHint": "Ask the agent to apply style pack {id}",
     "nav.noCharacters": "No characters",
+    "nav.projectCreated": "Created {time}",
+    "nav.projectUpdated": "Updated {time}",
 
     "chat.emptyTitle": "Start with a reference clip, or just describe an idea",
     "chat.emptyExample": "e.g. Study the camera moves and lighting of <code>/Users/you/Movies/reference.mp4</code> and make an 8-second rainy-night street shot.",
