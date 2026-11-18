@@ -474,6 +474,7 @@ async function updateBrief(ctx: ToolContext, args: Args) {
   if (args.avoid !== undefined) brief.avoid = stringArray(args, "avoid");
   if (args.notes !== undefined) brief.notes = optString(args, "notes");
   if (ctx.project.stage === "brief" && brief.idea) ctx.project.stage = "plan";
+  // ctx.save() 写完盘就会广播 state，不需要再手动 emit。
   await ctx.save();
   return { ok: true, brief };
 }
@@ -504,7 +505,6 @@ async function downloadXhsTool(ctx: ToolContext, args: Args) {
   const url = extractUrlFromText(raw) ?? raw;
   if (!isXhsUrl(url)) throw new Error("不是小红书链接，请提供 xiaohongshu.com 或 xhslink.com 链接");
   const download = await downloadXhsIntoProject(ctx, url);
-  ctx.emit({ type: "state", project: ctx.project });
   return {
     ok: true,
     title: download.title,
@@ -543,7 +543,6 @@ async function study(ctx: ToolContext, args: Args) {
     signal: ctx.signal,
     onProgress: (percent, label) => ctx.emit({ type: "progress", scope: "study_reference_video", percent, label }),
   });
-  ctx.emit({ type: "state", project: ctx.project });
   const manifest = result.manifest;
   return {
     ok: true,
@@ -798,7 +797,6 @@ async function resumeShotTool(ctx: ToolContext, args: Args) {
     onProgress: (percent, label) => ctx.emit({ type: "progress", scope: "resume_shot", percent, label }),
     probeOnly: args.probeOnly === true,
   });
-  ctx.emit({ type: "state", project: ctx.project });
   return { ok: true, ...result };
 }
 
@@ -812,7 +810,6 @@ async function stitchShotsTool(ctx: ToolContext, args: Args) {
     signal: ctx.signal,
     onProgress: (percent, label) => ctx.emit({ type: "progress", scope: "stitch_shots", percent, label }),
   });
-  ctx.emit({ type: "state", project: ctx.project });
   return result;
 }
 
@@ -828,7 +825,6 @@ async function generateStillTool(ctx: ToolContext, args: Args) {
     signal: ctx.signal,
     onProgress: (percent, label) => ctx.emit({ type: "progress", scope: "generate_still", percent, label }),
   });
-  ctx.emit({ type: "state", project: ctx.project });
   return { ok: true, ...result };
 }
 
@@ -960,7 +956,6 @@ async function extractSkillsTool(ctx: ToolContext) {
   });
   ctx.project.learning.skills = { created: result.created.length, merged: result.merged.length };
   await ctx.save();
-  ctx.emit({ type: "state", project: ctx.project });
   return { ok: true, ...result };
 }
 

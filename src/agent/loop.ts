@@ -70,6 +70,10 @@ export async function runAgentTurn(
     save: async () => {
       if (meta.deleted) return;
       await saveProjectMergingRender(project);
+      // 每个工具写完盘就广播一次 state，不要等到整轮结束。
+      // 否则 Agent 一轮里连调 update_brief → study_reference_video → plan_shots 时，
+      // 右侧「概览」的需求卡片要等学习跑完（几分钟）才刷新。
+      emit({ type: "state", project });
     },
   };
 
