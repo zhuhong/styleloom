@@ -510,6 +510,7 @@ code { background: #1f2733; padding: 1px 5px; border-radius: 5px; font-size: 12p
 .skillRateBtn.mixed.active { color: #fbbf24; border-color: #5b4a1f; background: #2a2417; }
 .skillRateBtn.bad.active { color: var(--danger); border-color: #5b2626; background: #2a1717; }
 .skillFeedbackSaved { color: var(--accent); font-size: 11px; }
+.skillFeedbackRow.collapsed { gap: 8px; }
 
 /* 幽灵按钮统一规范：与 panel / line 形成一致的暗黑次级按键质感 */
 button.ghost, .ghost {

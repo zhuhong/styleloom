@@ -1,3 +1,4 @@
+import { useState } from "preact/hooks";
 import type { MediaRequest, PlanShot, Project, RenderJob, SkillRating } from "../../lib/types";
 import {
   fileUrl,
@@ -25,6 +26,7 @@ export function Plan({
   skillFeedbackBusy,
   skillFeedbackNotes,
 }: PlanProps) {
+  const [editingShotIds, setEditingShotIds] = useState<Record<string, true>>({});
   const plan = project.plan || [];
   const jobByShot = new Map<string, RenderJob>();
   for (const job of jobs) {
@@ -122,32 +124,52 @@ export function Plan({
                   <p class="planSkills">{t("plan.skillsBound", { count: skillCount })}</p>
                 ) : null}
                 {canRate ? (
-                  <div class="skillFeedbackRow">
-                    <span class="skillFeedbackLabel">{t("plan.skillFeedback")}</span>
-                    {(["good", "mixed", "bad"] as SkillRating[]).map((rating) => (
-                      <button
-                        key={rating}
-                        class={`skillRateBtn ${rating}${saved?.rating === rating ? " active" : ""}`}
-                        type="button"
-                        disabled={busy}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          onSkillOutcome?.(shot.id, rating);
-                        }}
-                      >
-                        {t(`skills.rate.${rating}`)}
-                      </button>
-                    ))}
-                    {saved ? (
+                  saved && !editingShotIds[shot.id] ? (
+                    <div class="skillFeedbackRow collapsed">
                       <span class="skillFeedbackSaved">
                         {t("plan.skillFeedbackSaved", {
                           rating: t(`skills.rate.${saved.rating}`),
                           count: saved.count ?? skillCount,
                         })}
                       </span>
-                    ) : null}
-                  </div>
+                      <button
+                        class="textButton"
+                        type="button"
+                        disabled={busy}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          setEditingShotIds(current => ({ ...current, [shot.id]: true }));
+                        }}
+                      >
+                        {t("plan.skillFeedbackChange")}
+                      </button>
+                    </div>
+                  ) : (
+                    <div class="skillFeedbackRow">
+                      <span class="skillFeedbackLabel">{t("plan.skillFeedback")}</span>
+                      {(["good", "mixed", "bad"] as SkillRating[]).map((rating) => (
+                        <button
+                          key={rating}
+                          class={`skillRateBtn ${rating}${saved?.rating === rating ? " active" : ""}`}
+                          type="button"
+                          disabled={busy}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            setEditingShotIds(current => {
+                              const next = { ...current };
+                              delete next[shot.id];
+                              return next;
+                            });
+                            onSkillOutcome?.(shot.id, rating);
+                          }}
+                        >
+                          {t(`skills.rate.${rating}`)}
+                        </button>
+                      ))}
+                    </div>
+                  )
                 ) : null}
                 {shot.action ? (
                   <details class="fold planDetails">

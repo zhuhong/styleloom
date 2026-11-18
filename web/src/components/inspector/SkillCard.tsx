@@ -1,3 +1,4 @@
+import { useEffect, useState } from "preact/hooks";
 import type { SkillRating, SkillSummary } from "../../lib/types";
 import {
   skillFileUrl,
@@ -16,6 +17,10 @@ type SkillCardProps = {
 };
 
 export function SkillCard({ skill, onOpenMedia, onRate, rateBusy, savedRating }: SkillCardProps) {
+  const [editing, setEditing] = useState(false);
+  useEffect(() => {
+    if (savedRating) setEditing(false);
+  }, [savedRating]);
   return (
     <details class="skillCard">
       <summary>
@@ -75,29 +80,45 @@ export function SkillCard({ skill, onOpenMedia, onRate, rateBusy, savedRating }:
         {skill.needsFeedback ? ` · ${t("skills.needsFeedback")}` : ""}
       </p>
       {onRate && skill.source !== "public" ? (
-        <div class="skillFeedbackRow">
-          <span class="skillFeedbackLabel">{t("skills.rateLabel")}</span>
-          {(["good", "mixed", "bad"] as SkillRating[]).map((rating) => (
+        savedRating && !editing ? (
+          <div class="skillFeedbackRow collapsed">
+            <span class="skillFeedbackSaved">
+              {t("skills.rateSaved", { rating: t(`skills.rate.${savedRating}`) })}
+            </span>
             <button
-              key={rating}
-              class={`skillRateBtn ${rating}${savedRating === rating ? " active" : ""}`}
+              class="textButton"
               type="button"
               disabled={rateBusy}
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
-                onRate(skill.id, rating);
+                setEditing(true);
               }}
             >
-              {t(`skills.rate.${rating}`)}
+              {t("skills.rateChange")}
             </button>
-          ))}
-          {savedRating ? (
-            <span class="skillFeedbackSaved">
-              {t("skills.rateSaved", { rating: t(`skills.rate.${savedRating}`) })}
-            </span>
-          ) : null}
-        </div>
+          </div>
+        ) : (
+          <div class="skillFeedbackRow">
+            <span class="skillFeedbackLabel">{t("skills.rateLabel")}</span>
+            {(["good", "mixed", "bad"] as SkillRating[]).map((rating) => (
+              <button
+                key={rating}
+                class={`skillRateBtn ${rating}${savedRating === rating ? " active" : ""}`}
+                type="button"
+                disabled={rateBusy}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setEditing(false);
+                  onRate(skill.id, rating);
+                }}
+              >
+                {t(`skills.rate.${rating}`)}
+              </button>
+            ))}
+          </div>
+        )
       ) : null}
     </details>
   );

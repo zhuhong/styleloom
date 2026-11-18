@@ -167,6 +167,7 @@ const dictionaries: Record<Lang, Dict> = {
     "plan.skillsBound": "绑定 {count} 条技能",
     "plan.skillFeedback": "技能效果",
     "plan.skillFeedbackSaved": "已记录：{rating} · {count} 条技能",
+    "plan.skillFeedbackChange": "修改",
 
     "assets.title": "素材",
     "assets.all": "全部",
@@ -193,6 +194,7 @@ const dictionaries: Record<Lang, Dict> = {
     "skills.rate.mixed": "一般",
     "skills.rate.bad": "差",
     "skills.rateSaved": "已记录：{rating}",
+    "skills.rateChange": "修改",
     "skills.needProject": "请先打开一个项目，再给技能记反馈。",
 
     "tool.running": "运行中…",
@@ -454,6 +456,7 @@ const dictionaries: Record<Lang, Dict> = {
     "plan.skillsBound": "{count} skills bound",
     "plan.skillFeedback": "Skill result",
     "plan.skillFeedbackSaved": "Saved: {rating} · {count} skills",
+    "plan.skillFeedbackChange": "Change",
 
     "assets.title": "Assets",
     "assets.all": "All",
@@ -480,6 +483,7 @@ const dictionaries: Record<Lang, Dict> = {
     "skills.rate.mixed": "Mixed",
     "skills.rate.bad": "Bad",
     "skills.rateSaved": "Saved: {rating}",
+    "skills.rateChange": "Change",
     "skills.needProject": "Open a project before rating a skill.",
 
     "tool.running": "Running…",
