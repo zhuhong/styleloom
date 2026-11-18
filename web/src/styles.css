@@ -62,6 +62,32 @@ code { background: #1f2733; padding: 1px 5px; border-radius: 5px; font-size: 12p
 .sidebar { min-height: 0; border-right: 1px solid var(--line); padding: 12px; overflow: auto; background: rgba(18, 22, 28, 0.5); }
 .sideHeader { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.8px; margin: 6px 4px 10px; }
 .packsHeader { margin-top: 26px; }
+.packsToggle {
+  width: calc(100% - 8px);
+  margin-left: 4px;
+  margin-right: 4px;
+  padding: 6px 4px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+.packsToggle:hover { background: var(--panel2); color: var(--text); }
+.packsToggleLabel { display: inline-flex; align-items: center; gap: 6px; }
+.packsChevron { display: inline-block; width: 0.9em; font-size: 11px; opacity: 0.85; }
+.packsCount {
+  min-width: 1.4em;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #1f2733;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.6;
+  text-align: center;
+  text-transform: none;
+  letter-spacing: 0;
+}
 .iconButton { background: transparent; border: 1px solid var(--line); border-radius: 8px; width: 26px; height: 26px; line-height: 1; color: var(--text); }
 .iconButton:hover { border-color: var(--accent); color: var(--accent); }
 .projectList { display: flex; flex-direction: column; gap: 6px; }
