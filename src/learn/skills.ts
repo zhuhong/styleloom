@@ -28,7 +28,8 @@ const systemPrompt = `你是视频制作技能库的编辑。你的任务是把�
 技能必须是可执行的方法：在别的项目里看到类似场景时，能直接指导分镜、镜头运动、灯光或 H3 提示词。
 不要收录具体人物身份、具体公司/项目名、只对这部片成立的细节。
 kind 只能取：camera / lighting / color / composition / rhythm / prompt / sound / workflow / avoid。
-输出 JSON：{"skills":[{...}]}，最多 8 条，宁少勿滥。
+已有技能库会一并提供：语义相同或高度相近时，优先复用已有 name/tags（系统会合并证据），不要换个说法新建；只输出真正新增的方法，或能给已有技能补充的更清晰表述。
+输出 JSON：{"skills":[{...}]}，最多 6 条，宁少勿滥。
 每条技能字段：
 {
   "name": "中文短名，24字内",
@@ -116,7 +117,22 @@ function fallbackDrafts(bible: StyleBible, manifest: SliceManifest): SkillDraft[
       evidenceShotIds: firstShots,
     });
   }
-  return drafts.slice(0, 8);
+  return drafts.slice(0, 6);
+}
+
+function existingCatalog(skills: Skill[]) {
+  return skills
+    .filter(skill => skill.status !== "deprecated" && !skill.mergedInto)
+    .slice(0, 48)
+    .map(skill => ({
+      id: skill.id,
+      kind: skill.kind,
+      name: skill.name,
+      summaryZh: skill.summaryZh,
+      tags: skill.tags,
+      confidence: skill.confidence,
+      status: skill.status,
+    }));
 }
 
 function compactBible(bible: StyleBible) {
@@ -177,6 +193,7 @@ export async function extractSkillsFromStudy(options: {
   onProgress(5, "抽取可复用技能");
   let drafts: SkillDraft[] = [];
   let warning: string | undefined;
+  const working = await listSkills();
   try {
     const observations = manifest.shots.slice(0, 30).map(shot => ({
       id: shot.id,
@@ -192,25 +209,25 @@ export async function extractSkillsFromStudy(options: {
       action: shot.annotation?.action,
       description: shot.annotation?.description?.slice(0, 240),
     }));
+    const catalog = existingCatalog(working);
     const { data } = await chatJson<{ skills?: unknown[] }>({
       system: systemPrompt,
       prompt: `参考片信息：${manifest.sourceName}，${manifest.duration.toFixed(1)} 秒，${manifest.shots.length} 个镜头。
 风格圣经：${JSON.stringify(compactBible(bible))}
 逐镜观察：${JSON.stringify(observations)}
+已有技能库（优先合并，勿重复新建）：${JSON.stringify(catalog)}
 请输出技能 JSON。`,
       model: "text",
       signal,
       timeoutMs: 240_000,
     });
-    drafts = (data.skills ?? []).map(normalizeDraft).filter((draft): draft is SkillDraft => Boolean(draft)).slice(0, 8);
+    drafts = (data.skills ?? []).map(normalizeDraft).filter((draft): draft is SkillDraft => Boolean(draft)).slice(0, 6);
   } catch (error) {
     if (signal.aborted) throw error;
     warning = `技能抽取模型调用失败，已使用规则版：${error instanceof Error ? error.message : String(error)}`;
   }
   if (!drafts.length) drafts = fallbackDrafts(bible, manifest);
   onProgress(60, `合并 ${drafts.length} 条候选技能`);
-
-  const working = await listSkills();
   const created: Skill[] = [];
   const merged: Skill[] = [];
   for (let index = 0; index < drafts.length; index++) {

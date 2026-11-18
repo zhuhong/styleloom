@@ -2,6 +2,7 @@ import type { Project, PromptMode, ShotPlan, StyleBible } from "../types";
 import { chat } from "../providers/llm";
 import { loadSettings } from "../config";
 import { getManifest } from "../store/projects";
+import { loadSkillsByIds, skillPromptInjection } from "../store/skills";
 import { normalizeStyleBible } from "../learn/bible";
 
 export type ReferenceImage = { path: string; label: string; role: "subject" | "location" };
@@ -121,15 +122,16 @@ function subjectLines(shot: ShotPlan, bible?: StyleBible) {
   return clip(parts.join(" "), 900);
 }
 
-function commonDescription(shot: ShotPlan, bible: StyleBible | undefined, duration: number) {
+function commonDescription(shot: ShotPlan, bible: StyleBible | undefined, duration: number, skillText = "") {
   const style = clip(bible?.style.stylePrefix ?? "Cinematic live-action with natural skin tones, motivated lighting and restrained color separation.", 320);
   const anchors = bible?.prompting.consistencyAnchors?.length ? clip(`Keep consistent: ${bible.prompting.consistencyAnchors.join("; ")}.`, 560) : "";
   const subjects = subjectLines(shot, bible);
   const action = clip(shot.action || "The subject holds a subtle, natural pose and slowly shifts weight.", 900);
   const camera = clip(shot.camera || "The camera holds a stable, motivated frame.", 520);
   const lighting = clip(shot.lighting || bible?.style.lighting || "Motivated soft key light with natural falloff.", 420);
+  const skills = skillText ? clip(skillText, 720) : "";
   const dialogue = dialogueBlock(shot.dialogue ?? "", shot.characterIds.length ? [subjectName(shot, bible)] : []);
-  return `[Shot 1] ${style} ${subjects} ${action} ${camera} ${lighting}${dialogue ? ` ${dialogue}` : ""} The action runs for ${duration.toFixed(2)} seconds with physically plausible momentum, contact, secondary motion and a settled result. ${anchors}`.replace(/\s+/g, " ").trim();
+  return `[Shot 1] ${style} ${subjects} ${action} ${camera} ${lighting}${skills ? ` ${skills}` : ""}${dialogue ? ` ${dialogue}` : ""} The action runs for ${duration.toFixed(2)} seconds with physically plausible momentum, contact, secondary motion and a settled result. ${anchors}`.replace(/\s+/g, " ").trim();
 }
 
 function subjectName(shot: ShotPlan, bible?: StyleBible) {
@@ -152,9 +154,10 @@ export function buildPromptSkeleton(input: {
   mode: PromptMode;
   duration: number;
   references: PreparedReferences;
+  skillText?: string;
 }) {
   const { shot, bible, mode, duration, references } = input;
-  const description = commonDescription(shot, bible, duration);
+  const description = commonDescription(shot, bible, duration, input.skillText ?? "");
   const sound = `overall_soundscape: ${soundBlock(shot, bible)}`;
   const music = `non_diegetic_music: ${musicBlock(bible)}`;
   if (mode !== "ref2va") {
@@ -247,13 +250,20 @@ export async function composeShotPrompt(input: {
   duration: number;
   aspectRatio: string;
   references: PreparedReferences;
+  skillIds?: string[];
   signal?: AbortSignal;
-}): Promise<{ prompt: string; source: "llm" | "template"; problems: string[] }> {
+}): Promise<{ prompt: string; source: "llm" | "template"; problems: string[]; skillIds: string[] }> {
   const { shot, bible, mode, duration, aspectRatio, references } = input;
-  const skeleton = buildPromptSkeleton({ shot, bible, mode, duration, references });
+  const skillIds = [...new Set((input.skillIds ?? shot.skillIds ?? []).filter(Boolean))];
+  const skillBundle = skillPromptInjection(await loadSkillsByIds(skillIds));
+  const skillText = [
+    ...skillBundle.fragments.map(fragment => `Apply craft guidance: ${fragment}.`),
+    skillBundle.avoidWhen.length ? `Avoid: ${skillBundle.avoidWhen.join("; ")}.` : "",
+  ].filter(Boolean).join(" ");
+  const skeleton = buildPromptSkeleton({ shot, bible, mode, duration, references, skillText });
   const settings = await loadSettings();
   if (!settings.llm.model.trim() || !settings.llm.baseUrl.trim()) {
-    return { prompt: skeleton, source: "template", problems: [] };
+    return { prompt: skeleton, source: "template", problems: [], skillIds };
   }
   const payload = {
     mode,
@@ -266,12 +276,16 @@ export async function composeShotPrompt(input: {
       camera: shot.camera,
       lighting: shot.lighting,
       sound: shot.sound,
+      skillIds,
     },
+    skills: skillBundle.notes,
+    skillFragments: skillBundle.fragments,
+    skillAvoidWhen: skillBundle.avoidWhen,
     style: bible?.style,
     characters: shot.characterIds.map(id => bible?.characters.find(character => character.id === id)).filter(Boolean),
     location: bible?.locations.find(location => location.id === shot.locationId),
     consistencyAnchors: bible?.prompting.consistencyAnchors,
-    avoid: bible?.prompting.avoid,
+    avoid: [...(bible?.prompting.avoid ?? []), ...skillBundle.avoidWhen],
     references: {
       images: references.images.map((image, index) => ({ label: `<Picture ${index + 1}>`, role: image.role, description: image.label })),
       videos: references.videos.map((video, index) => ({ label: `<Video ${index + 1}>`, description: video.label })),
@@ -281,7 +295,7 @@ export async function composeShotPrompt(input: {
     const result = await chat({
       messages: [
         { role: "system", content: writingSystem },
-        { role: "user", content: `Create the final H3 prompt from this JSON:\n${JSON.stringify(payload)}\n\nFallback skeleton for structure (improve it, keep the structure):\n${skeleton}` },
+        { role: "user", content: `Create the final H3 prompt from this JSON:\n${JSON.stringify(payload)}\n\nIf skills / skillFragments are present, weave their promptFragment language into camera, lighting, action or style phrasing; honor skillAvoidWhen. Do not dump skill ids into the prompt.\n\nFallback skeleton for structure (improve it, keep the structure):\n${skeleton}` },
       ],
       temperature: 0.4,
       maxTokens: 5000,
@@ -305,10 +319,10 @@ export async function composeShotPrompt(input: {
       prompt = stripFences(compressed.content);
       problems = validatePrompt(prompt, mode, duration);
     }
-    if (problems.length) return { prompt: skeleton, source: "template", problems };
-    return { prompt, source: "llm", problems: [] };
+    if (problems.length) return { prompt: skeleton, source: "template", problems, skillIds };
+    return { prompt, source: "llm", problems: [], skillIds };
   } catch (error) {
     if (input.signal?.aborted) throw error;
-    return { prompt: skeleton, source: "template", problems: [`提示词模型调用失败：${error instanceof Error ? error.message : String(error)}`] };
+    return { prompt: skeleton, source: "template", problems: [`提示词模型调用失败：${error instanceof Error ? error.message : String(error)}`], skillIds };
   }
 }

@@ -124,13 +124,20 @@ function clamp(value: number, min = 0, max = 1) {
   return Math.min(max, Math.max(min, value));
 }
 
+/** 独立项目证据数：升降级与置信度只认不同 projectId，不认同项目多镜头。 */
+export function uniqueProjectEvidenceCount(skill: Pick<Skill, "evidence">) {
+  return new Set(skill.evidence.map(item => item.projectId).filter(Boolean)).size;
+}
+
 export function computeConfidence(skill: Pick<Skill, "evidence" | "outcomes" | "stats">) {
   const good = skill.stats.good;
   const mixed = skill.stats.mixed;
   const bad = skill.stats.bad;
   const total = good + mixed + bad;
-  const evidenceBonus = Math.min(0.25, 0.07 * Math.max(0, skill.evidence.length - 1));
+  const projects = uniqueProjectEvidenceCount(skill);
+  const evidenceBonus = Math.min(0.25, 0.07 * Math.max(0, projects - 1));
   const outcomeScore = total ? ((good + mixed * 0.5) / total) * 0.4 : 0;
+  // ACT: 使用次数只微调排序，不把「爱用但未验证」抬成高置信。
   const usageBonus = Math.min(0.08, skill.stats.used * 0.01);
   return clamp(0.32 + evidenceBonus + outcomeScore + usageBonus);
 }
@@ -139,8 +146,9 @@ export function refreshSkillState(skill: Skill) {
   skill.confidence = Number(computeConfidence(skill).toFixed(2));
   if (skill.statusLocked || skill.mergedInto) return skill;
   const { good, mixed, bad } = skill.stats;
+  const projects = uniqueProjectEvidenceCount(skill);
   if (bad >= 2 && bad > good + mixed) skill.status = "deprecated";
-  else if (good >= 1 || skill.evidence.length >= 3 || skill.confidence >= 0.6) skill.status = "active";
+  else if (good >= 1 || projects >= 3 || skill.confidence >= 0.6) skill.status = "active";
   else skill.status = "candidate";
   return skill;
 }
@@ -174,7 +182,7 @@ export function skillSimilarity(draft: SkillDraft, skill: Skill) {
   return Math.max(0.55 * tagScore + 0.45 * textScore, 0.75 * fragmentScore + 0.25 * tagScore);
 }
 
-export function findBestMatch(draft: SkillDraft, skills: Skill[], threshold = 0.52) {
+export function findBestMatch(draft: SkillDraft, skills: Skill[], threshold = 0.42) {
   let best: Skill | undefined;
   let bestScore = 0;
   for (const skill of skills) {
@@ -376,13 +384,12 @@ export async function recordSkillOutcome(input: {
   return skill;
 }
 
-export async function markSkillUsed(id: string, usage: { projectId: string; shotId: string }) {
+export async function markSkillUsed(id: string, _usage: { projectId: string; shotId: string }) {
   const skill = await getSkill(id);
   skill.stats.used += 1;
   skill.stats.lastUsedAt = nowIso();
-  skill.evidence = skill.evidence.length
-    ? skill.evidence
-    : [{ projectId: usage.projectId, projectTitle: usage.projectId, shotIds: [usage.shotId], addedAt: nowIso() }];
+  // ACT: 使用 ≠ 学习证据；不再用 usage 伪造 evidence，避免同项目刷独立证据。
+  refreshSkillState(skill);
   await writeSkill(skill);
   return skill;
 }
@@ -448,6 +455,8 @@ export async function mergeSkills(sourceId: string, targetId: string) {
 }
 
 export function skillToSummary(skill: Skill) {
+  const uniqueProjects = uniqueProjectEvidenceCount(skill);
+  const feedback = skill.stats.good + skill.stats.mixed + skill.stats.bad;
   return {
     id: skill.id,
     name: skill.name,
@@ -455,15 +464,21 @@ export function skillToSummary(skill: Skill) {
     status: skill.status,
     confidence: skill.confidence,
     summaryZh: skill.summaryZh,
+    instruction: skill.instruction,
+    promptFragment: skill.promptFragment,
     applicableWhen: skill.applicableWhen,
+    avoidWhen: skill.avoidWhen,
     tags: skill.tags,
     version: skill.version,
     evidenceCount: skill.evidence.length,
+    uniqueProjects,
     images: skill.evidence.map(item => item.image).filter((image): image is string => Boolean(image)).slice(-2),
     used: skill.stats.used,
     good: skill.stats.good,
     mixed: skill.stats.mixed,
     bad: skill.stats.bad,
+    needsFeedback: skill.stats.used >= 3 && feedback === 0,
+    source: skill.source ?? "local",
     updatedAt: skill.updatedAt,
   };
 }
@@ -595,6 +610,82 @@ export async function exportPublicSkill(id: string, options: { dryRun?: boolean;
   await writeText(join(dir, "SKILL.md"), publicSkillToMarkdown(item));
   invalidateSkillsCache();
   return { ok: true, id, path: `skills/${id}/`, publicSkill: item, target };
+}
+
+/** 按 id 加载可用技能（跳过停用/已合并）。 */
+export async function loadSkillsByIds(ids: string[]) {
+  const unique = [...new Set(ids.map(id => id.trim()).filter(Boolean))];
+  const skills: Skill[] = [];
+  for (const id of unique) {
+    const skill = await readJsonIfExists<Skill>(skillJsonPath(id));
+    if (!skill || skill.status === "deprecated" || skill.mergedInto) continue;
+    skills.push(skill);
+  }
+  return skills;
+}
+
+/** 把分镜选用的技能整理成可注入提示词的片段。 */
+export function skillPromptInjection(skills: Skill[]) {
+  const fragments = skills.map(skill => skill.promptFragment.trim()).filter(Boolean);
+  const avoidWhen = [...new Set(skills.flatMap(skill => skill.avoidWhen.map(item => item.trim()).filter(Boolean)))];
+  const notes = skills.map(skill => ({
+    id: skill.id,
+    kind: skill.kind,
+    name: skill.name,
+    instruction: skill.instruction,
+    promptFragment: skill.promptFragment,
+    avoidWhen: skill.avoidWhen,
+  }));
+  return { fragments, avoidWhen, notes };
+}
+
+/** 扫描近义技能对，供 Agent/UI 做合并建议（不自动合并）。 */
+export function findNearDuplicatePairs(skills: Skill[], threshold = 0.38) {
+  const live = skills.filter(skill => skill.status !== "deprecated" && !skill.mergedInto);
+  const pairs: { score: number; left: Skill; right: Skill }[] = [];
+  for (let index = 0; index < live.length; index++) {
+    for (let next = index + 1; next < live.length; next++) {
+      const left = live[index];
+      const right = live[next];
+      if (left.kind !== right.kind) continue;
+      const score = skillSimilarity({
+        name: left.name,
+        kind: left.kind,
+        summaryZh: left.summaryZh,
+        instruction: left.instruction,
+        promptFragment: left.promptFragment,
+        applicableWhen: left.applicableWhen,
+        avoidWhen: left.avoidWhen,
+        tags: left.tags,
+      }, right);
+      if (score >= threshold) pairs.push({ score: Number(score.toFixed(2)), left, right });
+    }
+  }
+  return pairs.sort((a, b) => b.score - a.score);
+}
+
+/** 对某个分镜绑定的多条技能一次性记反馈。 */
+export async function recordSkillOutcomesForShot(input: {
+  skillIds: string[];
+  rating: "good" | "mixed" | "bad";
+  projectId: string;
+  shotId: string;
+  notes?: string;
+}) {
+  const ids = [...new Set(input.skillIds.map(id => id.trim()).filter(Boolean))];
+  if (!ids.length) throw new Error("该分镜没有绑定技能，无法记录反馈");
+  const updated: Skill[] = [];
+  for (const skillId of ids) {
+    const skill = await recordSkillOutcome({
+      skillId,
+      rating: input.rating,
+      projectId: input.projectId,
+      shotId: input.shotId,
+      notes: input.notes,
+    });
+    updated.push(skill);
+  }
+  return updated;
 }
 
 export { exists };

@@ -38,7 +38,7 @@ bun run chat                # 终端对话
 - 文件操作统一走 `src/util/fs.ts`；ffmpeg 统一走 `src/util/ffmpeg.ts`；模型调用统一走 `src/providers/`。
 - 项目内文件路径一律存**项目相对路径**（POSIX 风格），读写时用 `safeJoin` 校验边界。
 - 全局技能存 `data/skills/<id>/`，证据图复制进技能目录，不依赖原项目。
-- 技能置信度只由证据与真实反馈计算；模型自评不直接抬高置信度。
+- 技能置信度只由**独立项目**证据与真实反馈计算；模型自评与单纯使用次数不直接抬高置信度。`skillIds` 会在写提示词时自动注入 fragment。
 - 所有覆盖写使用原子写（`writeJson` / `writeText`）。
 - 有意简化或已知上限用 `ACT:` 注释写清楚。
 
@@ -74,3 +74,4 @@ bun run chat                # 终端对话
 3. 更新 `agent/prompt.ts` 的流程说明（否则模型不会正确使用）。
 4. 计费/下载/技能类工具要补失败提示与恢复路径。
 5. 更新 README、ARCHITECTURE 与对应 `docs/*.md`。
+6. 技能类工具若影响升降级/反馈闭环，同步检查 `src/store/skills.ts` 的独立项目口径与前端反馈入口。

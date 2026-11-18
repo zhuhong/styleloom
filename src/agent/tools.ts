@@ -15,7 +15,7 @@ import { stitchShots } from "../generate/stitch";
 import { H3_SAFE_MIN_SECONDS, normalizeShotDuration } from "../util/duration";
 import { composeShotPrompt, prepareReferences } from "../generate/prompt";
 import { downloadXhsVideo, extractUrlFromText, isXhsUrl } from "../providers/download/xhs";
-import { exportPublicSkill, mergeSkills, readSkillResolved, recordSkillOutcome, searchSkills, skillToSummary, updateSkill } from "../store/skills";
+import { exportPublicSkill, findNearDuplicatePairs, listSkills, mergeSkills, readSkillResolved, recordSkillOutcome, searchSkills, skillToSummary, updateSkill } from "../store/skills";
 import { extractSkillsFromStudy } from "../learn/skills";
 import { normalizeStyleBible } from "../learn/bible";
 
@@ -285,6 +285,17 @@ export const toolSpecs: ToolSpec[] = [
         overwrite: { type: "boolean", description: "覆盖已存在的同名公开技能" },
       },
       required: ["skillId"],
+    },
+  },
+  {
+    name: "review_skill_duplicates",
+    description: "扫描本机技能库中的近义重复对，返回合并建议（不自动合并）。库膨胀或学习后出现相似运镜/灯光技能时先用这个。",
+    parameters: {
+      type: "object",
+      properties: {
+        threshold: { type: "number", description: "相似度阈值，默认 0.38" },
+        limit: { type: "number", description: "最多返回几对，默认 12" },
+      },
     },
   },
   {
@@ -725,6 +736,7 @@ async function buildPrompt(ctx: ToolContext, args: Args) {
     duration: shot.durationSeconds,
     aspectRatio: ctx.project.brief.aspectRatio ?? ctx.settings.video.aspectRatio,
     references,
+    skillIds: shot.skillIds,
     signal: ctx.signal,
   });
   shot.prompt = composed.prompt;
@@ -738,6 +750,7 @@ async function buildPrompt(ctx: ToolContext, args: Args) {
     mode: references.mode,
     source: composed.source,
     problems: composed.problems,
+    skillIds: composed.skillIds,
     prompt: composed.prompt,
     references: { firstFrame: references.firstFrame, images: references.images.map(image => image.path), videos: references.videos.map(video => video.path) },
   };
@@ -982,6 +995,22 @@ async function mergeSkillsTool(_ctx: ToolContext, args: Args) {
   return { ok: true, target: skillToSummary(merged.target), source: skillToSummary(merged.source) };
 }
 
+async function reviewSkillDuplicatesTool(_ctx: ToolContext, args: Args) {
+  const threshold = typeof args.threshold === "number" ? args.threshold : 0.38;
+  const limit = Math.min(30, Math.max(1, typeof args.limit === "number" ? Math.floor(args.limit) : 12));
+  const pairs = findNearDuplicatePairs(await listSkills(true), threshold).slice(0, limit);
+  return {
+    ok: true,
+    count: pairs.length,
+    pairs: pairs.map(pair => ({
+      score: pair.score,
+      left: skillToSummary(pair.left),
+      right: skillToSummary(pair.right),
+      suggestion: `可考虑 merge_skills(sourceId=${pair.right.id}, targetId=${pair.left.id})，保留证据更多/置信更高的一侧做 target`,
+    })),
+  };
+}
+
 const handlers: Record<string, (ctx: ToolContext, args: Args) => Promise<unknown>> = {
   update_brief: updateBrief,
   download_xhs_video: downloadXhsTool,
@@ -995,6 +1024,7 @@ const handlers: Record<string, (ctx: ToolContext, args: Args) => Promise<unknown
   update_skill: updateSkillTool,
   merge_skills: mergeSkillsTool,
   export_skills: exportSkillsTool,
+  review_skill_duplicates: reviewSkillDuplicatesTool,
   update_style_bible: updateBible,
   plan_shots: planShots,
   set_shot_references: setShotReferences,

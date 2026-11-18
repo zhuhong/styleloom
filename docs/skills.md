@@ -95,26 +95,27 @@ study_reference_video
 
 ```
 confidence = 0.32
-           + min(0.25, 0.07 × (证据项目数 - 1))
+           + min(0.25, 0.07 × (独立项目证据数 - 1))
            + (好评 + 0.5×一般) / 总反馈 × 0.4
            + min(0.08, 使用次数 × 0.01)
 ```
 
 - `candidate`：刚抽取，默认 0.32–0.5。
-- `active`：至少 1 次好评，或 ≥3 个独立项目证据，或置信度 ≥0.6。
+- `active`：至少 1 次好评，或 ≥3 个**独立项目**证据（按 `projectId` 去重），或置信度 ≥0.6。
 - `deprecated`：差评 ≥2 且差评多于好评+一般；或被 `merge_skills` 合并。
 - 人工调用 `update_skill` 指定 `status` 后，`statusLocked` 会阻止自动升降级。
+- `markSkillUsed` 只累计使用次数，**不会**把 usage 写成证据。
 
 LLM 的自评 confidence 只用于候选排序，**不会**直接抬高置信度；必须靠独立证据或真实反馈。
 
 ## Agent 怎么用
 
 1. 规划前 `search_skills`（中文关键词、kind 可选），命中后 `read_skill`。
-2. 把技能的 `promptFragment` 写进 `shot.camera` / `lighting` / `action`，或直接用进 H3 提示词；只用在语义匹配的镜头，遵守 `avoidWhen`。
-3. `plan_shots` 用 `skillIds` 记录采用了哪些技能；`generate_shot` 也会接收 `skillIds`。
-4. 生成后问用户效果，`record_skill_outcome(good|mixed|bad, notes)` 更新统计。
-5. 重复技能 `merge_skills`，规则不准 `update_skill` 改写，长期不用可改 `deprecated`。
-6. 学习完成后 Agent 会汇报新增/合并了哪些技能。
+2. `plan_shots` 用 `skillIds` 记录采用了哪些技能；`build_shot_prompt` / `generate_shot` 会按 `skillIds` **自动注入** `promptFragment` 与 `avoidWhen`。Agent 仍应把选型理由写进 `camera` / `lighting` / `action`。
+3. 只用在语义匹配的镜头，遵守 `avoidWhen`。
+4. 生成后可在右侧分镜/技能面板点「好/一般/差」，或由 Agent 调用 `record_skill_outcome`。
+5. 近义重复先 `review_skill_duplicates`，确认后再 `merge_skills`；规则不准用 `update_skill` 改写，长期不用可改 `deprecated`。
+6. 学习完成后 Agent 会汇报新增/合并了哪些技能。抽取前会把已有技能摘要塞进提示词，默认最多 6 条，优先合并。
 
 ## 手动维护
 
@@ -127,7 +128,7 @@ LLM 的自评 confidence 只用于候选排序，**不会**直接抬高置信度
 
 - 检索是词法匹配（标签、名称、文本、中文 bigram），不是向量检索；技能多到几百条后可换 embedding。
 - 反馈只统计，不会自动改写规则；需要 Agent 根据 `outcomes.notes` 调 `update_skill`。
-- 合并是「源并入目标」，不做双向自动聚类；重复提取时靠相似度阈值 0.52 自动合并。
+- 合并是「源并入目标」，不做双向自动聚类；重复提取时靠相似度阈值约 0.42 自动合并；更低的近义对由 `review_skill_duplicates` 建议人工确认。
 - 证据图最多 2 张/技能，参考片段不复制。
 - 角色/场景身份不进入全局技能库，避免跨项目串脸。
 
@@ -141,4 +142,7 @@ LLM 的自评 confidence 只用于候选排序，**不会**直接抬高置信度
 | `record_skill_outcome` | 记录好/一般/差 |
 | `update_skill` | 修正内容或状态 |
 | `merge_skills` | 合并重复技能 |
+| `review_skill_duplicates` | 扫描近义重复，给出合并建议 |
 | `export_skills` | 把本机技能导出为公开条目（剥离证据/反馈/置信度） |
+
+HTTP 辅助接口：`POST /api/skills/:id/outcome`、`POST /api/projects/:id/shots/:shotId/skill-outcomes`、`PATCH /api/skills/:id`。
