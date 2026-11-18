@@ -59,6 +59,8 @@ export function App() {
 
   const projectRef = useRef<Project | null>(null);
   const jobsSourceRef = useRef<EventSource | null>(null);
+  /** 所有存活的 EventSource。切项目/重连时全关，避免残留连接用旧项目的 job 覆盖面板。 */
+  const jobsSourcesRef = useRef<Set<EventSource>>(new Set());
   const jobsRetryRef = useRef(0);
   const jobsRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -134,10 +136,11 @@ export function App() {
   }, [loadPacks, loadSkills, refreshDetail]);
 
   const connectJobs = useCallback((projectId: string | null, options: { keepJobs?: boolean } = {}) => {
-    if (jobsSourceRef.current) {
-      jobsSourceRef.current.close();
-      jobsSourceRef.current = null;
-    }
+    // 关闭所有旧连接，不只是 ref 里那个。
+    // 否则 onerror 重连与切项目并发时会有两条流并存，旧流继续推别的项目的 job。
+    for (const stale of jobsSourcesRef.current) stale.close();
+    jobsSourcesRef.current.clear();
+    jobsSourceRef.current = null;
     clearTimeout(jobsRetryTimerRef.current ?? undefined);
     jobsRetryTimerRef.current = null;
     if (!options.keepJobs) setJobs([]);
@@ -145,6 +148,7 @@ export function App() {
 
     const source = new EventSource(`/api/projects/${encodeURIComponent(projectId)}/jobs/stream`);
     jobsSourceRef.current = source;
+    jobsSourcesRef.current.add(source);
 
     source.onopen = () => {
       jobsRetryRef.current = 0;
@@ -152,6 +156,7 @@ export function App() {
         api<{ jobs: RenderJob[] }>(`/api/projects/${encodeURIComponent(projectId)}/jobs`)
           .then(data => {
             if (projectRef.current?.id !== projectId) return;
+            if (jobsSourceRef.current !== source) return;
             setJobs(data.jobs || []);
           })
           .catch(() => {});
@@ -159,6 +164,8 @@ export function App() {
     };
 
     source.onmessage = event => {
+      // 已不是当前连接 → 丢弃。防止旧项目的流继续改写面板。
+      if (jobsSourceRef.current !== source) return;
       let payload: { type?: string; jobs?: RenderJob[]; job?: RenderJob };
       try {
         payload = JSON.parse(event.data);
@@ -190,6 +197,7 @@ export function App() {
     source.onerror = () => {
       if (jobsSourceRef.current !== source) return;
       source.close();
+      jobsSourcesRef.current.delete(source);
       jobsSourceRef.current = null;
       const attempt = jobsRetryRef.current + 1;
       jobsRetryRef.current = attempt;
@@ -251,7 +259,9 @@ export function App() {
       }
     })();
     return () => {
-      jobsSourceRef.current?.close();
+      for (const source of jobsSourcesRef.current) source.close();
+      jobsSourcesRef.current.clear();
+      jobsSourceRef.current = null;
       clearTimeout(jobsRetryTimerRef.current ?? undefined);
       clearTimeout(refreshTimerRef.current ?? undefined);
     };
