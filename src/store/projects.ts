@@ -179,11 +179,16 @@ export async function saveProjectMergingRender(project: Project) {
 /**
  * 读最新盘上状态 → 交给 mutator 修改 → 写回。
  * 后台任务用它，避免拿着旧快照覆盖对话轮次刚写的内容。
+ *
+ * mutator 返回 `false` 时视为「无变更」：不落盘、不刷 updatedAt。
+ * 否则每次服务启动的 reconcile 都会把所有项目的 updatedAt 刷成当前时间，
+ * 侧栏按 updatedAt 排序就彻底失效（真实踩到：6 个项目挤进 4 毫秒）。
  */
 export async function mutateProject<T>(id: string, mutator: (project: Project) => T | Promise<T>): Promise<T> {
   return withProjectLock(id, async () => {
     const project = await getProject(id);
     const result = await mutator(project);
+    if (result === false) return result;
     if (project.styleBible) project.styleBible = normalizeStyleBible(project.styleBible);
     project.updatedAt = nowIso();
     await writeJson(projectFile(id), project);
