@@ -24,6 +24,63 @@ export type RenderJob = {
 const jobs = new Map<string, RenderJob>();
 /** 每个项目一个订阅者集合，用于把进度推给右侧面板。 */
 const subscribers = new Map<string, Set<(job: RenderJob) => void>>();
+
+/** 终态任务只做短暂展示（让用户能点「播放」），不长期占用内存。 */
+const TERMINAL_STATUSES = new Set<RenderJobStatus>(["done", "failed"]);
+/** 终态任务保留时长：超过就清掉，数据已在 project.json 里。 */
+export const TERMINAL_TTL_MS = Number(process.env.RENDER_JOB_TTL_MS ?? 60 * 60 * 1000);
+/** 每个项目最多保留的终态任务数，防止连跑多条时无限堆积。 */
+export const TERMINAL_MAX_PER_PROJECT = Number(process.env.RENDER_JOB_MAX_TERMINAL ?? 5);
+
+/**
+ * 清理终态任务，返回被清掉的 id。
+ *
+ * running / pending 永远不会被清：前者正在跑，后者代表已计费、待恢复的任务，
+ * 清掉会让用户找不到可接回的平台任务。
+ *
+ * 抽成纯函数（显式传入 store 与当前时间）纯粹为了可测，不靠改环境变量或真出片。
+ */
+export function pruneTerminalJobs(
+  store: Map<string, RenderJob>,
+  nowMs: number,
+  options: { ttlMs: number; maxPerProject: number },
+): string[] {
+  const removed: string[] = [];
+  // 1) 按年龄清：跨项目生效，冷门项目的终态任务也不会常驻
+  for (const [id, job] of store) {
+    if (!TERMINAL_STATUSES.has(job.status)) continue;
+    const at = Date.parse(job.updatedAt);
+    if (!Number.isFinite(at) || nowMs - at > options.ttlMs) {
+      store.delete(id);
+      removed.push(id);
+    }
+  }
+  // 2) 按项目保留最近 N 条
+  const byProject = new Map<string, RenderJob[]>();
+  for (const job of store.values()) {
+    if (!TERMINAL_STATUSES.has(job.status)) continue;
+    const list = byProject.get(job.projectId) ?? [];
+    list.push(job);
+    byProject.set(job.projectId, list);
+  }
+  for (const list of byProject.values()) {
+    if (list.length <= options.maxPerProject) continue;
+    // updatedAt 新的排前面，超出上限的丢掉
+    list.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    for (const job of list.slice(options.maxPerProject)) {
+      store.delete(job.id);
+      removed.push(job.id);
+    }
+  }
+  return removed;
+}
+
+function pruneJobs() {
+  return pruneTerminalJobs(jobs, Date.now(), {
+    ttlMs: TERMINAL_TTL_MS,
+    maxPerProject: TERMINAL_MAX_PER_PROJECT,
+  });
+}
 /**
  * 正在跑的 generateShot 持有的镜头快照读取器。
  * 对话旧快照可能把盘上 videoId 抹掉，重启前可用 flushLiveVideoIds 把内存里的任务 ID 写回盘。
@@ -59,6 +116,8 @@ export function subscribeJobs(projectId: string, send: (job: RenderJob) => void)
 }
 
 export function listJobs(projectId: string): RenderJob[] {
+  // 读的时候顺手清理终态任务：不需要后台定时器，任何一次读取都能收敛。
+  pruneJobs();
   return [...jobs.values()]
     .filter(job => job.projectId === projectId)
     .sort((left, right) => right.startedAt.localeCompare(left.startedAt));
@@ -168,6 +227,24 @@ export function startRenderJob(options: StartRenderJobOptions): RenderJob {
 export function startResumeJob(projectId: string, shotId: string): RenderJob {
   const existing = activeJobForShot(projectId, shotId);
   if (existing) return existing;
+  // 同一镜头可能已经有一条 pending 记录。复用它，不要为每次点击新建一条，
+  // 否则反复点「恢复等待」会在面板里堆出一串重复的 pending。
+  const pending = listJobs(projectId).find(job => job.shotId === shotId && job.status === "pending");
+  if (pending) {
+    const job = patch(pending, {
+      status: "running",
+      percent: 0,
+      label: "接回已提交任务",
+      error: undefined,
+      startedAt: now(),
+    });
+    void runResume(job);
+    return job;
+  }
+  return startResumeJobFresh(projectId, shotId);
+}
+
+function startResumeJobFresh(projectId: string, shotId: string): RenderJob {
   const job = register(projectId, shotId, "接回已提交任务");
   void runResume(job);
   return job;
