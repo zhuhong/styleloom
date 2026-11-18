@@ -1,4 +1,4 @@
-import type { MediaRequest, PlanShot, Project, RenderJob } from "../../lib/types";
+import type { MediaRequest, PlanShot, Project, RenderJob, SkillRating } from "../../lib/types";
 import {
   fileUrl,
   formatSeconds,
@@ -11,9 +11,20 @@ type PlanProps = {
   jobs: RenderJob[];
   onOpenMedia: (media: MediaRequest) => void;
   onTabChange: (tab: "jobs") => void;
+  onSkillOutcome?: (shotId: string, rating: SkillRating) => void;
+  skillFeedbackBusy?: string | null;
+  skillFeedbackNotes?: Record<string, { rating: SkillRating; count?: number }>;
 };
 
-export function Plan({ project, jobs, onOpenMedia, onTabChange }: PlanProps) {
+export function Plan({
+  project,
+  jobs,
+  onOpenMedia,
+  onTabChange,
+  onSkillOutcome,
+  skillFeedbackBusy,
+  skillFeedbackNotes,
+}: PlanProps) {
   const plan = project.plan || [];
   const jobByShot = new Map<string, RenderJob>();
   for (const job of jobs) {
@@ -48,6 +59,10 @@ export function Plan({ project, jobs, onOpenMedia, onTabChange }: PlanProps) {
         const posterUrl = preview ? fileUrl(project.id, preview.path) : "";
         const liveJob = jobByShot.get(shot.id);
         const livePercent = liveJob ? Math.max(0, Math.min(100, Math.round(liveJob.percent || 0))) : 0;
+        const skillCount = shot.skillIds?.length ?? 0;
+        const canRate = Boolean(onSkillOutcome && shot.status === "done" && skillCount > 0);
+        const busy = skillFeedbackBusy === shot.id;
+        const saved = skillFeedbackNotes?.[shot.id];
 
         return (
           <div key={shot.id} class="planRow">
@@ -101,6 +116,37 @@ export function Plan({ project, jobs, onOpenMedia, onTabChange }: PlanProps) {
                     <button class="textButton" type="button" onClick={() => onTabChange("jobs")}>
                       {t("plan.viewJobs")}
                     </button>
+                  </div>
+                ) : null}
+                {skillCount ? (
+                  <p class="planSkills">{t("plan.skillsBound", { count: skillCount })}</p>
+                ) : null}
+                {canRate ? (
+                  <div class="skillFeedbackRow">
+                    <span class="skillFeedbackLabel">{t("plan.skillFeedback")}</span>
+                    {(["good", "mixed", "bad"] as SkillRating[]).map((rating) => (
+                      <button
+                        key={rating}
+                        class={`skillRateBtn ${rating}${saved?.rating === rating ? " active" : ""}`}
+                        type="button"
+                        disabled={busy}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onSkillOutcome?.(shot.id, rating);
+                        }}
+                      >
+                        {t(`skills.rate.${rating}`)}
+                      </button>
+                    ))}
+                    {saved ? (
+                      <span class="skillFeedbackSaved">
+                        {t("plan.skillFeedbackSaved", {
+                          rating: t(`skills.rate.${saved.rating}`),
+                          count: saved.count ?? skillCount,
+                        })}
+                      </span>
+                    ) : null}
                   </div>
                 ) : null}
                 {shot.action ? (

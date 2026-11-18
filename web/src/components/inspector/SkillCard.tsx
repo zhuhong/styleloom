@@ -1,4 +1,4 @@
-import type { SkillSummary } from "../../lib/types";
+import type { SkillRating, SkillSummary } from "../../lib/types";
 import {
   skillFileUrl,
   skillKindLabel,
@@ -10,9 +10,12 @@ import type { MediaRequest } from "../../lib/types";
 type SkillCardProps = {
   skill: SkillSummary;
   onOpenMedia: (media: MediaRequest) => void;
+  onRate?: (skillId: string, rating: SkillRating) => void;
+  rateBusy?: boolean;
+  savedRating?: SkillRating;
 };
 
-export function SkillCard({ skill, onOpenMedia }: SkillCardProps) {
+export function SkillCard({ skill, onOpenMedia, onRate, rateBusy, savedRating }: SkillCardProps) {
   return (
     <details class="skillCard">
       <summary>
@@ -63,12 +66,39 @@ export function SkillCard({ skill, onOpenMedia }: SkillCardProps) {
         {" · "}
         {t("skills.stats", {
           evidence: skill.evidenceCount,
+          projects: skill.uniqueProjects ?? 0,
           used: skill.used,
           good: skill.good,
           mixed: skill.mixed,
           bad: skill.bad,
         })}
+        {skill.needsFeedback ? ` · ${t("skills.needsFeedback")}` : ""}
       </p>
+      {onRate && skill.source !== "public" ? (
+        <div class="skillFeedbackRow">
+          <span class="skillFeedbackLabel">{t("skills.rateLabel")}</span>
+          {(["good", "mixed", "bad"] as SkillRating[]).map((rating) => (
+            <button
+              key={rating}
+              class={`skillRateBtn ${rating}${savedRating === rating ? " active" : ""}`}
+              type="button"
+              disabled={rateBusy}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onRate(skill.id, rating);
+              }}
+            >
+              {t(`skills.rate.${rating}`)}
+            </button>
+          ))}
+          {savedRating ? (
+            <span class="skillFeedbackSaved">
+              {t("skills.rateSaved", { rating: t(`skills.rate.${savedRating}`) })}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
     </details>
   );
 }

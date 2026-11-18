@@ -13,6 +13,7 @@ import type {
   ProjectSummary,
   ReferenceShot,
   RenderJob,
+  SkillRating,
   SkillSummary,
   StylePackSummary,
   ToolCardState,
@@ -56,8 +57,12 @@ export function App() {
   const [assetFilter, setAssetFilter] = useState("all");
   const [skillFilter, setSkillFilter] = useState("all");
   const [showAllSkills, setShowAllSkills] = useState(false);
+  const [skillFeedbackBusy, setSkillFeedbackBusy] = useState<string | null>(null);
+  const [skillFeedbackNotes, setSkillFeedbackNotes] = useState<Record<string, { rating: SkillRating; count?: number }>>({});
 
   const projectRef = useRef<Project | null>(null);
+  const streamingRef = useRef(false);
+  const handleEventRef = useRef<(event: Record<string, unknown>) => void>(() => {});
   const jobsSourceRef = useRef<EventSource | null>(null);
   /** 所有存活的 EventSource。切项目/重连时全关，避免残留连接用旧项目的 job 覆盖面板。 */
   const jobsSourcesRef = useRef<Set<EventSource>>(new Set());
@@ -68,6 +73,10 @@ export function App() {
   useEffect(() => {
     projectRef.current = project;
   }, [project]);
+
+  useEffect(() => {
+    streamingRef.current = streaming;
+  }, [streaming]);
 
   useEffect(() => {
     initLang();
@@ -110,6 +119,45 @@ export function App() {
     const data = await api<{ skills: SkillSummary[] }>("/api/skills");
     setSkills(data.skills || []);
   }, []);
+
+  const handleShotSkillOutcome = useCallback(async (shotId: string, rating: SkillRating) => {
+    const current = projectRef.current;
+    if (!current) return;
+    setSkillFeedbackBusy(shotId);
+    try {
+      const result = await api<{ skills?: SkillSummary[] }>(`/api/projects/${encodeURIComponent(current.id)}/shots/${encodeURIComponent(shotId)}/skill-outcomes`, {
+        method: "POST",
+        body: JSON.stringify({ rating }),
+      });
+      setSkillFeedbackNotes(notes => ({ ...notes, [shotId]: { rating, count: result.skills?.length ?? 0 } }));
+      await loadSkills();
+    } catch (error) {
+      pushError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSkillFeedbackBusy(null);
+    }
+  }, [loadSkills, pushError]);
+
+  const handleSkillOutcome = useCallback(async (skillId: string, rating: SkillRating) => {
+    const current = projectRef.current;
+    if (!current) {
+      pushError(t("skills.needProject"));
+      return;
+    }
+    setSkillFeedbackBusy(skillId);
+    try {
+      await api(`/api/skills/${encodeURIComponent(skillId)}/outcome`, {
+        method: "POST",
+        body: JSON.stringify({ rating, projectId: current.id }),
+      });
+      setSkillFeedbackNotes(notes => ({ ...notes, [skillId]: { rating } }));
+      await loadSkills();
+    } catch (error) {
+      pushError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSkillFeedbackBusy(null);
+    }
+  }, [loadSkills, pushError]);
 
   const loadSettings = useCallback(async () => {
     const data = await api<AppSettings>("/api/settings");
@@ -166,7 +214,7 @@ export function App() {
     source.onmessage = event => {
       // 已不是当前连接 → 丢弃。防止旧项目的流继续改写面板。
       if (jobsSourceRef.current !== source) return;
-      let payload: { type?: string; jobs?: RenderJob[]; job?: RenderJob };
+      let payload: { type?: string; jobs?: RenderJob[]; job?: RenderJob; event?: Record<string, unknown> };
       try {
         payload = JSON.parse(event.data);
       } catch {
@@ -191,6 +239,18 @@ export function App() {
         if (job.status === "done" || job.status === "pending" || job.status === "failed") {
           scheduleRefresh();
         }
+        return;
+      }
+      // 渲染完成唤醒：服务端把 Agent 事件复用到 jobs SSE，对话能第一时间看到。
+      if (payload.type === "agent" && payload.event) {
+        const agentEvent = payload.event as { type?: string };
+        if (agentEvent.type === "done") {
+          setStreaming(false);
+          scheduleRefresh();
+        } else if (agentEvent.type && agentEvent.type !== "ping" && !streamingRef.current) {
+          setStreaming(true);
+        }
+        handleEventRef.current(payload.event as Record<string, unknown>);
       }
     };
 
@@ -229,6 +289,8 @@ export function App() {
     setAssetFilter("all");
     setSkillFilter("all");
     setShowAllSkills(false);
+    setSkillFeedbackBusy(null);
+    setSkillFeedbackNotes({});
     try {
       const data = await api<{ project: Project; shots: ReferenceShot[]; messages: ChatMessage[] }>(
         `/api/projects/${encodeURIComponent(id)}`,
@@ -353,6 +415,10 @@ export function App() {
       pushError(t("errors.generic", { message: String(event.message ?? "") }));
     }
   }, [clearPendingUploads, connectJobs, loadProjects, pushBubble, pushError, scheduleRefresh, selectProject]);
+
+  useEffect(() => {
+    handleEventRef.current = handleEvent;
+  }, [handleEvent]);
 
   const sendMessage = useCallback(async (message: string, attachments: ChatAttachment[] = []) => {
     const current = projectRef.current;
@@ -658,6 +724,10 @@ export function App() {
           onToggleShowAllSkills={() => setShowAllSkills(value => !value)}
           onOpenMedia={setMedia}
           onResumeShot={shotId => void handleResumeShot(shotId)}
+          onShotSkillOutcome={(shotId, rating) => void handleShotSkillOutcome(shotId, rating)}
+          onSkillOutcome={(skillId, rating) => void handleSkillOutcome(skillId, rating)}
+          skillFeedbackBusy={skillFeedbackBusy}
+          skillFeedbackNotes={skillFeedbackNotes}
         />
       </main>
 

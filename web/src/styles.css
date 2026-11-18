@@ -468,6 +468,48 @@ code { background: #1f2733; padding: 1px 5px; border-radius: 5px; font-size: 12p
 .skillInstruction { white-space: pre-wrap; }
 .skillCard pre { white-space: pre-wrap; word-break: break-word; max-height: 180px; overflow: auto; background: #0d1117; border: 1px solid var(--line); border-radius: 7px; padding: 8px; font-size: 11px; }
 .skillStats { font-size: 11px !important; color: var(--muted) !important; }
+.skillToolbar { margin: 0 0 8px; }
+.skillSearch {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+}
+.skillSearch:focus { outline: none; border-color: #3a6b5c; }
+.planSkills { margin: 6px 0 0; color: var(--muted); font-size: 11px; }
+.skillFeedbackRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+.skillFeedbackLabel { color: var(--muted); font-size: 11px; }
+.skillRateBtn {
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+}
+.skillRateBtn:hover:not(:disabled) { color: var(--text); border-color: #3a6b5c; }
+.skillRateBtn:disabled { opacity: 0.55; cursor: wait; }
+.skillRateBtn.good:hover:not(:disabled),
+.skillRateBtn.good:focus-visible { color: var(--accent); border-color: #2b5c4c; background: #16342b; }
+.skillRateBtn.mixed:hover:not(:disabled),
+.skillRateBtn.mixed:focus-visible { color: #fbbf24; border-color: #5b4a1f; background: #2a2417; }
+.skillRateBtn.bad:hover:not(:disabled),
+.skillRateBtn.bad:focus-visible { color: var(--danger); border-color: #5b2626; background: #2a1717; }
+.skillRateBtn.good.active { color: var(--accent); border-color: #2b5c4c; background: #16342b; }
+.skillRateBtn.mixed.active { color: #fbbf24; border-color: #5b4a1f; background: #2a2417; }
+.skillRateBtn.bad.active { color: var(--danger); border-color: #5b2626; background: #2a1717; }
+.skillFeedbackSaved { color: var(--accent); font-size: 11px; }
 
 /* 幽灵按钮统一规范：与 panel / line 形成一致的暗黑次级按键质感 */
 button.ghost, .ghost {

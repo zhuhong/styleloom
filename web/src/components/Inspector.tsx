@@ -5,6 +5,7 @@ import type {
   Project,
   ReferenceShot,
   RenderJob,
+  SkillRating,
   SkillSummary,
 } from "../lib/types";
 import {
@@ -33,6 +34,10 @@ export type InspectorProps = {
   onToggleShowAllSkills: () => void;
   onOpenMedia: (media: MediaRequest) => void;
   onResumeShot: (shotId: string) => void;
+  onShotSkillOutcome?: (shotId: string, rating: SkillRating) => void;
+  onSkillOutcome?: (skillId: string, rating: SkillRating) => void;
+  skillFeedbackBusy?: string | null;
+  skillFeedbackNotes?: Record<string, { rating: SkillRating; count?: number }>;
 };
 
 export function Inspector({
@@ -50,6 +55,10 @@ export function Inspector({
   onToggleShowAllSkills,
   onOpenMedia,
   onResumeShot,
+  onShotSkillOutcome,
+  onSkillOutcome,
+  skillFeedbackBusy,
+  skillFeedbackNotes,
 }: InspectorProps) {
   const rootRef = useRef<HTMLElement>(null);
 
@@ -111,6 +120,9 @@ export function Inspector({
         jobs={jobs}
         onOpenMedia={onOpenMedia}
         onTabChange={() => onTabChange("jobs")}
+        onSkillOutcome={onShotSkillOutcome}
+        skillFeedbackBusy={skillFeedbackBusy}
+        skillFeedbackNotes={skillFeedbackNotes}
       />
     );
   } else if (activeTab === "jobs") {
@@ -140,6 +152,9 @@ export function Inspector({
         onSkillFilter={onSkillFilter}
         onToggleShowAllSkills={onToggleShowAllSkills}
         onOpenMedia={onOpenMedia}
+        onRateSkill={onSkillOutcome}
+        rateBusyId={skillFeedbackBusy}
+        skillFeedbackNotes={skillFeedbackNotes}
       />
     );
   }

@@ -40,13 +40,21 @@ export type SkillSummary = {
   instruction?: string;
   promptFragment?: string;
   applicableWhen?: string[];
+  avoidWhen?: string[];
+  tags?: string[];
   images?: string[];
   evidenceCount: number;
+  uniqueProjects?: number;
   used: number;
   good: number;
   mixed: number;
   bad: number;
+  needsFeedback?: boolean;
+  source?: "local" | "public";
+  updatedAt?: string;
 };
+
+export type SkillRating = "good" | "mixed" | "bad";
 
 export type LearningState = {
   status: string;
@@ -106,6 +114,7 @@ export type PlanShot = {
   prompt?: string;
   promptMode?: string;
   error?: string;
+  skillIds?: string[];
 };
 
 export type Project = {
