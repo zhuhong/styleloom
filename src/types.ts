@@ -205,6 +205,12 @@ export type ShotPlan = {
   referenceShotIds: string[];
   /** 本次实际采用的全局技能 */
   skillIds?: string[];
+  /** 该分镜最近一次技能效果评价（刷新后仍保持收起态） */
+  skillFeedback?: {
+    rating: "good" | "mixed" | "bad";
+    at: string;
+    count: number;
+  };
   /** 生成模式；auto 时按素材自动选择 */
   generationMode?: GenerationMode;
   firstFrame?: string;

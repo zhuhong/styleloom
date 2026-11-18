@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api } from "./lib/api";
 import { getLang, initLang, setLang, subscribeLang, t } from "./lib/i18n";
 import type {
@@ -15,6 +15,7 @@ import type {
   RenderJob,
   SkillRating,
   SkillSummary,
+  ShotSkillFeedback,
   StylePackSummary,
   ToolCardState,
 } from "./lib/types";
@@ -58,7 +59,8 @@ export function App() {
   const [skillFilter, setSkillFilter] = useState("all");
   const [showAllSkills, setShowAllSkills] = useState(false);
   const [skillFeedbackBusy, setSkillFeedbackBusy] = useState<string | null>(null);
-  const [skillFeedbackNotes, setSkillFeedbackNotes] = useState<Record<string, { rating: SkillRating; count?: number }>>({});
+  /** 本会话临时覆盖；持久态来自 project.plan[].skillFeedback / skills[].lastOutcome。 */
+  const [skillFeedbackOverrides, setSkillFeedbackOverrides] = useState<Record<string, { rating: SkillRating; count?: number }>>({});
 
   const projectRef = useRef<Project | null>(null);
   const streamingRef = useRef(false);
@@ -120,16 +122,44 @@ export function App() {
     setSkills(data.skills || []);
   }, []);
 
+  const skillFeedbackNotes = useMemo(() => {
+    const notes: Record<string, { rating: SkillRating; count?: number }> = {};
+    for (const shot of project?.plan || []) {
+      if (!shot.skillFeedback) continue;
+      notes[shot.id] = {
+        rating: shot.skillFeedback.rating,
+        count: shot.skillFeedback.count,
+      };
+    }
+    for (const skill of skills) {
+      if (!skill.lastOutcome) continue;
+      notes[skill.id] = { rating: skill.lastOutcome.rating };
+    }
+    return { ...notes, ...skillFeedbackOverrides };
+  }, [project, skills, skillFeedbackOverrides]);
+
   const handleShotSkillOutcome = useCallback(async (shotId: string, rating: SkillRating) => {
     const current = projectRef.current;
     if (!current) return;
     setSkillFeedbackBusy(shotId);
     try {
-      const result = await api<{ skills?: SkillSummary[] }>(`/api/projects/${encodeURIComponent(current.id)}/shots/${encodeURIComponent(shotId)}/skill-outcomes`, {
+      const result = await api<{ skills?: SkillSummary[]; skillFeedback?: ShotSkillFeedback }>(`/api/projects/${encodeURIComponent(current.id)}/shots/${encodeURIComponent(shotId)}/skill-outcomes`, {
         method: "POST",
         body: JSON.stringify({ rating }),
       });
-      setSkillFeedbackNotes(notes => ({ ...notes, [shotId]: { rating, count: result.skills?.length ?? 0 } }));
+      const feedback = result.skillFeedback ?? {
+        rating,
+        at: new Date().toISOString(),
+        count: result.skills?.length ?? 0,
+      };
+      setSkillFeedbackOverrides(notes => ({ ...notes, [shotId]: { rating: feedback.rating, count: feedback.count } }));
+      setProject(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          plan: (prev.plan || []).map(shot => shot.id === shotId ? { ...shot, skillFeedback: feedback } : shot),
+        };
+      });
       await loadSkills();
     } catch (error) {
       pushError(error instanceof Error ? error.message : String(error));
@@ -150,7 +180,7 @@ export function App() {
         method: "POST",
         body: JSON.stringify({ rating, projectId: current.id }),
       });
-      setSkillFeedbackNotes(notes => ({ ...notes, [skillId]: { rating } }));
+      setSkillFeedbackOverrides(notes => ({ ...notes, [skillId]: { rating } }));
       await loadSkills();
     } catch (error) {
       pushError(error instanceof Error ? error.message : String(error));
@@ -290,7 +320,7 @@ export function App() {
     setSkillFilter("all");
     setShowAllSkills(false);
     setSkillFeedbackBusy(null);
-    setSkillFeedbackNotes({});
+    setSkillFeedbackOverrides({});
     try {
       const data = await api<{ project: Project; shots: ReferenceShot[]; messages: ChatMessage[] }>(
         `/api/projects/${encodeURIComponent(id)}`,

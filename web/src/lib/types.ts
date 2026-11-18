@@ -30,6 +30,14 @@ export type StylePackSummary = {
   shotCount: number;
 };
 
+export type SkillRating = "good" | "mixed" | "bad";
+
+export type ShotSkillFeedback = {
+  rating: SkillRating;
+  at: string;
+  count: number;
+};
+
 export type SkillSummary = {
   id: string;
   name: string;
@@ -51,10 +59,14 @@ export type SkillSummary = {
   bad: number;
   needsFeedback?: boolean;
   source?: "local" | "public";
+  lastOutcome?: {
+    rating: SkillRating;
+    projectId: string;
+    shotId?: string;
+    at: string;
+  };
   updatedAt?: string;
 };
-
-export type SkillRating = "good" | "mixed" | "bad";
 
 export type LearningState = {
   status: string;
@@ -115,6 +127,7 @@ export type PlanShot = {
   promptMode?: string;
   error?: string;
   skillIds?: string[];
+  skillFeedback?: ShotSkillFeedback;
 };
 
 export type Project = {

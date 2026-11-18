@@ -2,7 +2,7 @@ import { basename, extname, join } from "node:path";
 import { writeFile } from "node:fs/promises";
 import { dataDir, loadSettings, maskSettings, preserveSecrets, saveSettings, settingsPath, webDir, defaultSettings } from "./config";
 import { ensureDir, exists, readJsonIfExists, safeJoin, slugify, stamp } from "./util/fs";
-import { addAsset, createProject, deleteProject, getManifest, getProject, listProjects, projectDir, readSession, renameProject, saveProject } from "./store/projects";
+import { addAsset, createProject, deleteProject, getManifest, getProject, listProjects, mutateProject, projectDir, readSession, renameProject, saveProject } from "./store/projects";
 import { listStylePacks } from "./store/library";
 import { getSkill, listSkills, recordSkillOutcome, recordSkillOutcomesForShot, searchSkills, skillEvidenceFile, skillToMarkdown, skillToSummary, updateSkill } from "./store/skills";
 import type { ChatAttachment, Project, SkillKind } from "./types";
@@ -311,7 +311,18 @@ const server = Bun.serve({
           shotId,
           notes: typeof body.notes === "string" ? body.notes : undefined,
         });
-        return json({ ok: true, skills: updated.map(skillToSummary) });
+        const skillFeedback: { rating: "good" | "mixed" | "bad"; at: string; count: number } = {
+          rating,
+          at: new Date().toISOString(),
+          count: updated.length,
+        };
+        await mutateProject(projectId, latest => {
+          const target = latest.plan.find(item => item.id === shotId);
+          if (!target) return;
+          target.skillFeedback = skillFeedback;
+          target.updatedAt = skillFeedback.at;
+        });
+        return json({ ok: true, skills: updated.map(skillToSummary), skillFeedback });
       }
       const skillFileMatch = path.match(/^\/skill-files\/([^/]+)\/(.+)$/);
       if (skillFileMatch) {

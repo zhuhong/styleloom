@@ -457,6 +457,7 @@ export async function mergeSkills(sourceId: string, targetId: string) {
 export function skillToSummary(skill: Skill) {
   const uniqueProjects = uniqueProjectEvidenceCount(skill);
   const feedback = skill.stats.good + skill.stats.mixed + skill.stats.bad;
+  const last = skill.outcomes[skill.outcomes.length - 1];
   return {
     id: skill.id,
     name: skill.name,
@@ -479,6 +480,9 @@ export function skillToSummary(skill: Skill) {
     bad: skill.stats.bad,
     needsFeedback: skill.stats.used >= 3 && feedback === 0,
     source: skill.source ?? "local",
+    lastOutcome: last
+      ? { rating: last.rating, projectId: last.projectId, shotId: last.shotId, at: last.at }
+      : undefined,
     updatedAt: skill.updatedAt,
   };
 }
