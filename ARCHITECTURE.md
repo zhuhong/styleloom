@@ -76,8 +76,8 @@ SSE 事件：`message`、`tool_start`、`progress`、`tool_end`、`state`、`err
 
 学习完成后自动执行，把「这部片是什么样」提炼成「以后遇到类似镜头怎么做」：
 
-- 一次文本模型调用，输入风格圣经 + 逐镜观察，输出 3–8 条候选技能（kind、中文规则、英文 prompt fragment、适用/避免条件、证据镜头）。
-- 与已有技能做相似度匹配（标签 Jaccard + 文本 Jaccard + prompt fragment Jaccard，阈值 0.52）；相似则合并证据与标签，版本 +1；否则新建 candidate。
+- 一次文本模型调用，输入风格圣经 + 逐镜观察 + 已有技能摘要，输出最多 6 条候选技能（kind、中文规则、英文 prompt fragment、适用/避免条件、证据镜头）；优先合并，勿重复新建。
+- 与已有技能做相似度匹配（标签 Jaccard + 文本 Jaccard + prompt fragment Jaccard，阈值约 0.42）；相似则合并证据与标签，版本 +1；否则新建 candidate。更低的近义对可由 `review_skill_duplicates` 建议人工确认。
 - 复制证据关键帧到 `data/skills/<id>/evidence/`，项目删除后技能仍可读。
 - LLM 失败退回规则版：运镜语法、灯光、调色、节奏、风格前缀、避坑清单。
 - 技能抽取失败不影响学习结果，只写 warning。
@@ -93,10 +93,11 @@ SSE 事件：`message`、`tool_start`、`progress`、`tool_end`、`state`、`err
   └─ merge_skills → 源技能 deprecated + mergedInto
 ```
 
-置信度 = 基础 0.32 + 证据加成（最多 0.25）+ 反馈加成（最多 0.4）+ 使用加成（最多 0.08）。
+置信度 = 基础 0.32 + 独立项目证据加成（最多 0.25）+ 反馈加成（最多 0.4）+ 使用加成（最多 0.08）。
+升降级看的是 `projectId` 去重后的证据项目数，不是证据条数；`markSkillUsed` 只记使用次数，不伪造证据。
 LLM 自评不直接进入置信度，必须靠独立证据或真实反馈。
 
-Agent 在规划前 `search_skills`、命中后 `read_skill`，把 prompt fragment 落到分镜；`plan_shots` / `generate_shot` 记录 `skillIds`，生成后 `record_skill_outcome` 回写反馈。
+Agent 在规划前 `search_skills`、命中后 `read_skill`；`plan_shots` 记录 `skillIds`，`build_shot_prompt` / `generate_shot` 按 `skillIds` 自动注入 `promptFragment` 与 `avoidWhen`。生成后可由右侧面板或 `record_skill_outcome` 回写反馈。
 
 ### 为什么用「风格圣经」而不是向量库
 
@@ -152,7 +153,7 @@ Agent 在规划前 `search_skills`、命中后 `read_skill`，把 prompt fragmen
   → Agent 调 generate_shot → startRenderJob() 立刻返回
   → 本轮对话结束（用户可继续聊别的事）
 
-浏览器 GET /api/projects/:id/jobs/stream（EventSource）
+浏览器 GET /api/projects/:id/jobs/stream（EventSource；同时承载 job 进度与渲染唤醒的 agent 事件）
   ← 服务端每次进度变化推送 { type: "job", job }
 
 服务端后台
@@ -164,6 +165,7 @@ Agent 在规划前 `search_skills`、命中后 `read_skill`，把 prompt fragmen
 
 - **不再随浏览器断开而中止**。以前 `AbortSignal` 来自 SSE 流，用户刷新页面就等于取消渲染；现在后台任务持有自己的 `AbortController`，与 HTTP 生命周期无关。
 - **进度不占对话气泡**。右侧「渲染」Tab 订阅 `/jobs/stream`，气泡里的 `generate_shot` 卡片只留一行「进度见右侧面板」。
+- **完成后会叫醒 Agent**。`running → done/failed/pending` 时先往对话插入「后台渲染」通知，再在项目空闲时自动跑一轮短对话（`[系统通知]` 用户消息对前端历史隐藏），避免用户一直干等或手动催问。
 - **对话写盘必须合并渲染字段**。Agent 循环用 `saveProjectMergingRender`，保留盘上已有的 `videoId` / generating / pending / done，避免旧快照把已计费任务抹掉后误报「无平台任务」。
 - **并发写盘安全**。`store/projects.ts` 增加按项目串行化的写锁；后台任务用 `mutateProject`（读最新 → 改 → 写），且只合并该镜头的渲染字段，不会用旧快照覆盖对话轮次刚写的内容。
 - **重启可恢复**。`reconcileStaleJobs()` 在启动时把盘上遗留的 `status="generating"` 修正为 `pending`（有 `videoId`）或 `failed`（无 `videoId`），配合 `resume_shot` 接回。
@@ -219,6 +221,7 @@ planned → promptReady → generating → done
 | `extract_skills` | 从当前项目补跑技能抽取 | 文本模型 |
 | `record_skill_outcome` | 记录技能使用效果 | 无 |
 | `update_skill` / `merge_skills` | 修正/合并技能 | 无 |
+| `review_skill_duplicates` | 扫描近义重复并给出合并建议 | 无 |
 | `export_skills` | 把本机技能导出为公开条目到 `skills/`（剥离证据图/反馈/置信度） | 无 |
 | `update_style_bible` | 人工修正（深合并） | 无 |
 | `plan_shots` | 写入分镜，可带 referenceImages/referenceVideos | 无 |

@@ -4,12 +4,14 @@ import { dataDir, loadSettings, maskSettings, preserveSecrets, saveSettings, set
 import { ensureDir, exists, readJsonIfExists, safeJoin, slugify, stamp } from "./util/fs";
 import { addAsset, createProject, deleteProject, getManifest, getProject, listProjects, projectDir, readSession, renameProject, saveProject } from "./store/projects";
 import { listStylePacks } from "./store/library";
-import { getSkill, listSkills, searchSkills, skillEvidenceFile, skillToMarkdown, skillToSummary } from "./store/skills";
+import { getSkill, listSkills, recordSkillOutcome, recordSkillOutcomesForShot, searchSkills, skillEvidenceFile, skillToMarkdown, skillToSummary, updateSkill } from "./store/skills";
 import type { ChatAttachment, Project, SkillKind } from "./types";
 import { runAgentTurn } from "./agent/loop";
+import { flushRenderWakeQueue, notifyRenderJobTerminal } from "./agent/renderWake";
+import { endAgentTurn, isAgentTurnActive, tryBeginAgentTurn } from "./agent/turnLock";
 import type { LlmMessage } from "./providers/llm";
 import { runProcess } from "./util/ffmpeg";
-import { clearJobsForProject, flushLiveVideoIds, listJobs, reconcileStaleJobs, startResumeJob, subscribeJobs } from "./generate/jobs";
+import { clearJobsForProject, flushLiveVideoIds, listJobs, reconcileStaleJobs, setRenderTerminalHook, startResumeJob, subscribeJobs, subscribeProjectAgentEvents } from "./generate/jobs";
 
 function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json; charset=utf-8" } });
@@ -23,6 +25,10 @@ function historyMessages(messages: LlmMessage[]) {
   return messages
     .filter(message => (message.role === "user" || message.role === "assistant")
       && ((typeof message.content === "string" && message.content.trim()) || message.attachments?.length))
+    // 渲染完成自动唤醒的用户消息只给模型看，不回放到聊天气泡。
+    .filter(message => !(message.role === "user"
+      && typeof message.content === "string"
+      && message.content.startsWith("[系统通知]")))
     .map(message => ({
       role: message.role,
       content: typeof message.content === "string" ? message.content : "",
@@ -80,8 +86,6 @@ async function serveProjectFile(projectId: string, relative: string) {
   return new Response(Bun.file(path));
 }
 
-const activeProjects = new Set<string>();
-
 function chatStream(projectId: string, message: string, attachments: ChatAttachment[] = []) {
   const encoder = new TextEncoder();
   const abort = new AbortController();
@@ -104,7 +108,7 @@ function chatStream(projectId: string, message: string, attachments: ChatAttachm
         if (!abort.signal.aborted) send({ type: "error", message: messageOf(error) });
       } finally {
         clearInterval(heartbeat);
-        activeProjects.delete(projectId);
+        endAgentTurn(projectId);
         send({ type: "done" });
         closed = true;
         try {
@@ -112,11 +116,13 @@ function chatStream(projectId: string, message: string, attachments: ChatAttachm
         } catch {
           // 客户端已经断开
         }
+        flushRenderWakeQueue(projectId);
       }
     },
     cancel() {
       abort.abort();
-      activeProjects.delete(projectId);
+      endAgentTurn(projectId);
+      flushRenderWakeQueue(projectId);
     },
   });
   return new Response(stream, {
@@ -149,12 +155,14 @@ function jobsStream(projectId: string) {
         }
       };
       send({ type: "snapshot", jobs: listJobs(projectId) });
-      const unsubscribe = subscribeJobs(projectId, job => send({ type: "job", job }));
+      const unsubscribeJobs = subscribeJobs(projectId, job => send({ type: "job", job }));
+      const unsubscribeAgent = subscribeProjectAgentEvents(projectId, event => send({ type: "agent", event }));
       const heartbeat = setInterval(() => send({ type: "ping" }), 15_000);
       cleanup = () => {
         if (closed && !heartbeat) return;
         clearInterval(heartbeat);
-        unsubscribe();
+        unsubscribeJobs();
+        unsubscribeAgent();
         if (!closed) {
           closed = true;
           try {
@@ -183,6 +191,9 @@ const settings = await loadSettings();
 await ensureDir(dataDir);
 if (!(await exists(settingsPath))) await saveSettings(defaultSettings);
 // 服务重启后内存里的渲染任务全丢，把盘上遗留的 generating 修正为 pending / failed。
+setRenderTerminalHook(job => {
+  void notifyRenderJobTerminal(job);
+});
 const repairedJobs = await reconcileStaleJobs().catch(() => [] as string[]);
 if (repairedJobs.length) console.log(`[reconcile] 修正遗留渲染状态：${repairedJobs.join("、")}`);
 const ffmpegCheck = await runProcess([settings.ffmpeg.ffmpegPath, "-version"]).catch(() => undefined);
@@ -231,10 +242,76 @@ const server = Bun.serve({
         const results = await searchSkills(query, { kind: kind ?? undefined, limit: 30 });
         return json({ skills: results.map(({ skill, score }) => ({ ...skillToSummary(skill), score })) });
       }
+      const skillOutcomeMatch = path.match(/^\/api\/skills\/([^/]+)\/outcome$/);
+      if (skillOutcomeMatch) {
+        if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+        const skillId = decodeURIComponent(skillOutcomeMatch[1]);
+        const body = (await request.json()) as {
+          rating?: unknown;
+          projectId?: unknown;
+          shotId?: unknown;
+          notes?: unknown;
+        };
+        const rating = body.rating;
+        if (rating !== "good" && rating !== "mixed" && rating !== "bad") {
+          throw new Error("rating 必须是 good / mixed / bad");
+        }
+        if (typeof body.projectId !== "string" || !body.projectId.trim()) {
+          throw new Error("projectId 必填");
+        }
+        await getProject(body.projectId.trim());
+        const skill = await recordSkillOutcome({
+          skillId,
+          rating,
+          projectId: body.projectId.trim(),
+          shotId: typeof body.shotId === "string" ? body.shotId : undefined,
+          notes: typeof body.notes === "string" ? body.notes : undefined,
+        });
+        return json({ ok: true, skill: skillToSummary(skill) });
+      }
       const skillMatch = path.match(/^\/api\/skills\/([^/]+)$/);
-      if (skillMatch && request.method === "GET") {
-        const skill = await getSkill(decodeURIComponent(skillMatch[1]));
-        return json({ skill, markdown: skillToMarkdown(skill) });
+      if (skillMatch) {
+        const skillId = decodeURIComponent(skillMatch[1]);
+        if (request.method === "GET") {
+          const skill = await getSkill(skillId);
+          return json({ skill, markdown: skillToMarkdown(skill) });
+        }
+        if (request.method === "PATCH") {
+          const body = (await request.json()) as { patch?: Record<string, unknown> };
+          if (!body.patch || typeof body.patch !== "object") throw new Error("请求体必须是 { patch }");
+          const skill = await updateSkill(skillId, body.patch);
+          return json({ ok: true, skill: skillToSummary(skill) });
+        }
+        return json({ error: "Method not allowed" }, 405);
+      }
+      const shotSkillOutcomeMatch = path.match(/^\/api\/projects\/([^/]+)\/shots\/([^/]+)\/skill-outcomes$/);
+      if (shotSkillOutcomeMatch) {
+        if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+        const projectId = decodeURIComponent(shotSkillOutcomeMatch[1]);
+        const shotId = decodeURIComponent(shotSkillOutcomeMatch[2]);
+        const project = await getProject(projectId);
+        const shot = project.plan.find(item => item.id === shotId);
+        if (!shot) throw new Error(`分镜不存在：${shotId}`);
+        const body = (await request.json()) as {
+          rating?: unknown;
+          notes?: unknown;
+          skillIds?: unknown;
+        };
+        const rating = body.rating;
+        if (rating !== "good" && rating !== "mixed" && rating !== "bad") {
+          throw new Error("rating 必须是 good / mixed / bad");
+        }
+        const skillIds = Array.isArray(body.skillIds)
+          ? body.skillIds.filter((id): id is string => typeof id === "string" && Boolean(id.trim()))
+          : (shot.skillIds ?? []);
+        const updated = await recordSkillOutcomesForShot({
+          skillIds,
+          rating,
+          projectId,
+          shotId,
+          notes: typeof body.notes === "string" ? body.notes : undefined,
+        });
+        return json({ ok: true, skills: updated.map(skillToSummary) });
       }
       const skillFileMatch = path.match(/^\/skill-files\/([^/]+)\/(.+)$/);
       if (skillFileMatch) {
@@ -321,8 +398,7 @@ const server = Bun.serve({
           const project = await getProject(projectId);
           const attachments = normalizeChatAttachments(body.attachments, project);
           if (!message && !attachments.length) throw new Error("消息不能为空");
-          if (activeProjects.has(projectId)) return json({ error: "该项目正在进行一轮对话，请等当前任务结束" }, 409);
-          activeProjects.add(projectId);
+          if (!tryBeginAgentTurn(projectId)) return json({ error: "该项目正在进行一轮对话，请等当前任务结束" }, 409);
           return chatStream(projectId, message, attachments);
         }
         if (request.method === "PATCH") {
@@ -331,7 +407,7 @@ const server = Bun.serve({
           return json({ project: await renameProject(projectId, title) });
         }
         if (request.method === "DELETE") {
-          if (activeProjects.has(projectId)) {
+          if (isAgentTurnActive(projectId)) {
             return json({ error: "该项目正在对话中，请等当前任务结束后再删除" }, 409);
           }
           const running = listJobs(projectId).some(job => job.status === "running");

@@ -83,7 +83,8 @@ export async function buildSystemPrompt(project: Project, settings: Settings) {
 4. plan_shots 写分镜：每个镜头 1-15 秒整数，默认 5-8 秒；只有用户明确要短镜头时才低于 4 秒。action / camera / lighting / sound / dialogue 用英文（dialogue 保留用户原文）。
 5. build_shot_prompt 预览提示词（不花钱）。
 6. 把「镜头表 + 关键提示词 + 预计总时长」展示给用户，明确询问是否开始生成。只有用户明确同意后，才调用 generate_shot（confirmed=true）。逐镜头生成，一次一个。
-   generate_shot 是**后台任务**：它立刻返回 jobId，不等出片。进度显示在右侧「渲染」面板，不占对话气泡，关掉页面也不会中断。不要因为拿不到成品就一直等或轮询，也不要在回复里编造进度——直接告诉用户「已在后台开始渲染，进度见右侧渲染面板」，然后结束本轮。
+   generate_shot 是**后台任务**：它立刻返回 jobId，不等出片。进度显示在右侧「渲染」面板，关掉页面也不会中断。不要因为拿不到成品就一直等或轮询，也不要在回复里编造进度——直接告诉用户「已在后台开始渲染，完成后我会立刻在对话里通知你」，然后结束本轮。
+   渲染进入 done/failed/pending 后，系统会往对话插入「后台渲染」通知，并在空闲时用「系统通知」自动唤起你。收到后立刻交代结果与下一步；对话里若已有完成通知，不要重复念长路径。不要重新 generate_shot。
    用户上传了图片/视频时，先用 list_assets 确认路径，再用 set_shot_references 绑定到具体分镜；不要假设上传文件就是首帧。
 7. 等所有镜头 status 变成 done 后，用 stitch_shots 拼接成片（本地 ffmpeg，不额外计费）；默认按分镜顺序硬切，需要转场时传 transitionSeconds。不要只给用户 ffmpeg 命令。如果还有镜头在渲染，先告诉用户「还有 N 个镜头在后台渲染」，不要拼半成品。
 8. 生成/拼接完成后用 list_assets 核对，向用户说明成片路径与镜头状态。
@@ -94,11 +95,11 @@ export async function buildSystemPrompt(project: Project, settings: Settings) {
 技能库是跨项目积累的方法（运镜/灯光/构图/节奏/提示词/流程/避坑），和项目内的「风格圣经」不是一回事。技能有两个来源：
 - **本机累积（data/skills/）**：随学习与真实反馈动态变化，含证据、置信度与升降级，是你的个人资产，优先使用。
 - **仓库公开库（skills/）**：随仓库分发的只读知识层，无证据图与反馈。公开条目默认 candidate / 0.32，仅作方法参考；真正采用并在本机产生反馈后，才在本机累积置信度。
-- 规划分镜前，先用 search_skills 按需求搜索；命中后 read_skill 看完整规则，把 promptFragment 落到 shot.camera / lighting / action，或写进提示词。plan_shots 时用 skillIds 记录本次采用的技能。
+- 规划分镜前，先用 search_skills 按需求搜索；命中后 read_skill 看完整规则。plan_shots 时用 skillIds 记录本次采用的技能；build_shot_prompt / generate_shot 会按 skillIds **自动注入** promptFragment 与 avoidWhen，你不必手工粘贴片段，但仍要把选型理由写进分镜的 camera/lighting/action。
 - 只用在语义匹配的镜头上；不要为了用技能而用。技能里的 avoidWhen 要遵守。
-- 每次生成后，先问用户这个镜头效果如何，再用 record_skill_outcome 记录 good / mixed / bad 和具体观察。公开条目不参与反馈写入（只读）。
-- 学习参考片会自动抽取技能；完成后向用户汇报新增/合并了哪些。重复技能用 merge_skills 合并，规则不准用 update_skill 修正。
-- 技能是长期资产：不要删，改为 deprecated；有 3 个以上独立项目证据或 1 次好评会自动 active。想把本机优质方法回馈给公开库，用 export_skills 导出成公开条目。
+- 生成后可请用户在右侧分镜/技能面板点「好/一般/差」；你也可以继续用 record_skill_outcome。公开条目不参与反馈写入（只读）。
+- 学习参考片会自动抽取技能；完成后向用户汇报新增/合并了哪些。库里近义重复时先 review_skill_duplicates，再经用户确认后用 merge_skills；规则不准用 update_skill 修正。
+- 技能是长期资产：不要删，改为 deprecated；有 3 个以上**独立项目**证据或 1 次好评会自动 active。想把本机优质方法回馈给公开库，用 export_skills 导出成公开条目。
 
 ${skillIndex}
 

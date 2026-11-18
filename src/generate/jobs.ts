@@ -24,6 +24,10 @@ export type RenderJob = {
 const jobs = new Map<string, RenderJob>();
 /** 每个项目一个订阅者集合，用于把进度推给右侧面板。 */
 const subscribers = new Map<string, Set<(job: RenderJob) => void>>();
+/** 项目级 Agent 事件（渲染完成唤醒等），复用 jobs SSE 推到前端对话。 */
+const agentSubscribers = new Map<string, Set<(event: AgentEvent) => void>>();
+/** 渲染终态钩子：由 server 注入，避免 jobs ↔ agent 循环依赖。 */
+let renderTerminalHook: ((job: RenderJob) => void) | undefined;
 
 /** 终态任务只做短暂展示（让用户能点「播放」），不长期占用内存。 */
 const TERMINAL_STATUSES = new Set<RenderJobStatus>(["done", "failed"]);
@@ -105,6 +109,20 @@ function broadcast(job: RenderJob) {
   }
 }
 
+export function broadcastProjectAgentEvent(projectId: string, event: AgentEvent) {
+  for (const send of agentSubscribers.get(projectId) ?? []) {
+    try {
+      send(event);
+    } catch {
+      // 订阅者已断开
+    }
+  }
+}
+
+export function setRenderTerminalHook(hook: ((job: RenderJob) => void) | undefined) {
+  renderTerminalHook = hook;
+}
+
 export function subscribeJobs(projectId: string, send: (job: RenderJob) => void) {
   const set = subscribers.get(projectId) ?? new Set();
   set.add(send);
@@ -112,6 +130,16 @@ export function subscribeJobs(projectId: string, send: (job: RenderJob) => void)
   return () => {
     set.delete(send);
     if (!set.size) subscribers.delete(projectId);
+  };
+}
+
+export function subscribeProjectAgentEvents(projectId: string, send: (event: AgentEvent) => void) {
+  const set = agentSubscribers.get(projectId) ?? new Set();
+  set.add(send);
+  agentSubscribers.set(projectId, set);
+  return () => {
+    set.delete(send);
+    if (!set.size) agentSubscribers.delete(projectId);
   };
 }
 
@@ -173,8 +201,19 @@ export function activeJobForShot(projectId: string, shotId: string): RenderJob |
 }
 
 function patch(job: RenderJob, changes: Partial<RenderJob>) {
+  const previous = job.status;
   Object.assign(job, changes, { updatedAt: now() });
   broadcast(job);
+  const becameTerminal = previous !== job.status
+    && (job.status === "done" || job.status === "failed" || job.status === "pending");
+  // pending 只有从 running 退出才算「本地放弃等待」的终态通知；reconcile 回填不重复吵醒。
+  if (becameTerminal && previous === "running") {
+    try {
+      renderTerminalHook?.(job);
+    } catch {
+      // 唤醒失败不影响任务本身
+    }
+  }
   return job;
 }
 
