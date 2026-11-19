@@ -26,6 +26,8 @@ type ChatPaneProps = {
   onRemoveUpload: (index: number) => void;
   onOpenMedia: (media: MediaRequest) => void;
   onFilesDropped: (files: FileList | File[]) => void;
+  onConfirmSubmit: (item: { id: string; shotId: string; title: string; durationSeconds?: number }) => void;
+  onConfirmDecline: (item: { id: string; shotId: string }) => void;
 };
 
 function BubbleAttachment({
@@ -144,6 +146,8 @@ export function ChatPane({
   onRemoveUpload,
   onOpenMedia,
   onFilesDropped,
+  onConfirmSubmit,
+  onConfirmDecline,
 }: ChatPaneProps) {
   const messagesRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -197,13 +201,42 @@ export function ChatPane({
       >
         {!items.length ? <EmptyChat /> : null}
         {items.map((item) => {
+          if (item.kind === "confirm") {
+            const settled = item.status !== "pending";
+            return (
+              <div key={item.id} class="confirmCard" data-status={item.status}>
+                <div class="confirmHead">
+                  {t("chat.confirmTitle")}
+                  <span class="confirmShot">{item.shotId}</span>
+                </div>
+                <div class="confirmBody">{item.title}</div>
+                <div class="confirmMeta">
+                  {t("chat.confirmCost", { duration: item.durationSeconds ? `${item.durationSeconds}s` : t("chat.confirmDurationUnknown") })}
+                </div>
+                {settled ? (
+                  <div class="confirmSettled">
+                    {item.status === "submitted" ? t("chat.confirmSubmitted") : t("chat.confirmDeclinedShort")}
+                  </div>
+                ) : (
+                  <div class="confirmActions">
+                    <button type="button" class="confirmPrimary" disabled={busy} onClick={() => onConfirmSubmit(item)}>
+                      {t("chat.confirmSubmit")}
+                    </button>
+                    <button type="button" class="confirmSecondary" onClick={() => onConfirmDecline(item)}>
+                      {t("chat.confirmCancel")}
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          }
           if (item.kind === "bubble") {
             const isMarkdown = item.role === "assistant" && !item.isError;
             const className = `bubble ${item.isError ? "error" : item.role}${isMarkdown ? " markdown" : ""}`;
             return (
               <div key={item.id} class={className}>
                 {isMarkdown ? (
-                  <span dangerouslySetInnerHTML={{ __html: renderMarkdown(item.content) }} style={{ display: "contents" }} />
+                  <span dangerouslySetInnerHTML={{ __html: renderMarkdown(item.content, projectId ?? undefined) }} style={{ display: "contents" }} />
                 ) : (
                   item.content
                 )}

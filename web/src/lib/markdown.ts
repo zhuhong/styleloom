@@ -28,7 +28,24 @@ function safeUrl(raw) {
   if (/^https?:\/\//i.test(url) || /^mailto:/i.test(url)) return url;
   if (/^\/\//.test(url)) return "";
   if (/^(\/|\.{1,2}\/|#)/.test(url)) return url;
+  // 不带协议的站点相对路径（assets/stills/x.png）也要放行；javascript: 之类保持拒绝。
+  if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return "";
+  if (/^[\w.-]+(\/[\w.-]*)+$/.test(url)) return url;
   return "";
+}
+
+/**
+ * 把模型写的媒体地址统一成可用 URL：
+ * `/files/...` 原样保留；裸项目相对路径（assets/...、shots/...）补成 `/files/<projectId>/...`。
+ * 相对地址在浏览器里会被解析成站点根，等于必 404，所以这里必须补全。
+ */
+function safeMediaUrl(raw, projectId) {
+  const url = safeUrl(raw);
+  if (!url) return "";
+  if (projectId && !/^[a-z]+:|^\/|\/files\//i.test(url)) {
+    return `/files/${encodeURIComponent(projectId)}/${url.split("/").map(encodeURIComponent).join("/")}`;
+  }
+  return url;
 }
 
 function restoreTokens(text, tokens) {
@@ -48,7 +65,7 @@ function renderLabel(text, tokens) {
   return restoreTokens(formatEmphasis(escapeHtml(text)), tokens);
 }
 
-function tokenizeInline(source) {
+function tokenizeInline(source, projectId) {
   const tokens = [];
   let text = String(source ?? "");
 
@@ -62,13 +79,25 @@ function tokenizeInline(source) {
 
   // 图片必须比链接先处理，否则 ![alt](url) 会只剩链接部分。
   text = text.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"([^"]*)")?\)/g, (match, alt, url, title) => {
-    const src = safeUrl(url);
+    const src = safeMediaUrl(url, projectId);
     if (!src) {
       const index = tokens.push(escapeHtml(match)) - 1;
       return `${PLACEHOLDER_OPEN}${index}${PLACEHOLDER_CLOSE}`;
     }
     const titleAttr = title ? ` title="${escapeHtml(title)}"` : "";
-    const index = tokens.push(`<img class="mdImage" src="${escapeHtml(src)}" alt="${escapeHtml(alt)}"${titleAttr} loading="lazy" />`) - 1;
+    const mediaAttrs = `data-media-src="${escapeHtml(src)}" data-media-title="${escapeHtml(alt)}" data-media-open="${escapeHtml(src)}"`;
+    // ![](x.mp4) 按扩展名降级成视频播放器；其余仍走图片。点击统一交给 ChatPane 的 data-media-src 处理。
+    const isVideo = /\.(mp4|webm|mov|m4v|ogv)(?:[?#]|$)/i.test(src);
+    if (isVideo) {
+      const index = tokens.push(`<video class="mdImage mdVideo" src="${escapeHtml(src)}"${titleAttr} controls preload="metadata" playsinline ${mediaAttrs}></video>`) - 1;
+      return `${PLACEHOLDER_OPEN}${index}${PLACEHOLDER_CLOSE}`;
+    }
+    const isAudio = /\.(mp3|m4a|wav|aac|ogg|flac)(?:[?#]|$)/i.test(src);
+    if (isAudio) {
+      const index = tokens.push(`<audio class="mdAudio" src="${escapeHtml(src)}"${titleAttr} controls preload="metadata" ${mediaAttrs}></audio>`) - 1;
+      return `${PLACEHOLDER_OPEN}${index}${PLACEHOLDER_CLOSE}`;
+    }
+    const index = tokens.push(`<img class="mdImage" src="${escapeHtml(src)}" alt="${escapeHtml(alt)}"${titleAttr} loading="lazy" ${mediaAttrs} />`) - 1;
     return `${PLACEHOLDER_OPEN}${index}${PLACEHOLDER_CLOSE}`;
   });
 
@@ -99,7 +128,9 @@ function splitTableRow(line) {
   let text = line.trim();
   if (text.startsWith("|")) text = text.slice(1);
   if (text.endsWith("|")) text = text.slice(0, -1);
-  return text.split("|").map(cell => cell.trim());
+  // 表格单元格里常放图片：管道符先换成占位符，避免 ![a](x|y.png) 把单元格切碎。
+  text = text.replace(/\]\(([^)]*)\)/g, match => match.replace(/\|/g, "\u0000"));
+  return text.split("|").map(cell => cell.trim().replace(/\u0000/g, "|"));
 }
 
 function looksLikeTableStart(lines, index) {
@@ -145,7 +176,7 @@ function renderCodeBlock(lines, start, end) {
   };
 }
 
-function renderList(lines, start, end) {
+function renderList(lines, start, end, projectId) {
   const first = lines[start].match(LIST_RE);
   if (!first) return null;
   const baseIndent = leadingIndent(first[1]);
@@ -175,7 +206,7 @@ function renderList(lines, start, end) {
       const indent = leadingIndent(match[1]);
       if (indent < baseIndent) break;
       if (indent > baseIndent) {
-        const nested = renderList(lines, index, end);
+        const nested = renderList(lines, index, end, projectId);
         if (nested && current) {
           current.nested += nested.html;
           index = nested.next;
@@ -208,13 +239,13 @@ function renderList(lines, start, end) {
       prefix = `<input class="mdTask" type="checkbox" disabled${task[1].toLowerCase() === "x" ? " checked" : ""} /> `;
       text = task[2];
     }
-    const linesHtml = text.split("\n").map(lineText => tokenizeInline(lineText)).join("<br>");
+    const linesHtml = text.split("\n").map(lineText => tokenizeInline(lineText, projectId)).join("<br>");
     return `<li>${prefix}${linesHtml}${item.nested}</li>`;
   }).join("");
   return { html: `<${tag}${startAttr}>${body}</${tag}>`, next: index };
 }
 
-function renderTable(lines, start, end) {
+function renderTable(lines, start, end, projectId) {
   const headers = splitTableRow(lines[start]);
   const alignments = splitTableRow(lines[start + 1]).map(cell => {
     const left = cell.startsWith(":");
@@ -226,7 +257,7 @@ function renderTable(lines, start, end) {
   });
   const cell = (tag, content, index) => {
     const alignment = alignments[index] ? ` style="text-align:${alignments[index]}"` : "";
-    return `<${tag}${alignment}>${tokenizeInline(content)}</${tag}>`;
+    return `<${tag}${alignment}>${tokenizeInline(content, projectId)}</${tag}>`;
   };
   const head = headers.map((header, index) => cell("th", header, index)).join("");
   const rows = [];
@@ -243,7 +274,7 @@ function renderTable(lines, start, end) {
   };
 }
 
-function renderBlocks(lines) {
+function renderBlocks(lines, projectId) {
   const output = [];
   let index = 0;
   while (index < lines.length) {
@@ -263,7 +294,7 @@ function renderBlocks(lines) {
     const heading = line.match(HEADING_RE);
     if (heading) {
       const level = heading[1].length;
-      output.push(`<h${level}>${tokenizeInline(heading[2])}</h${level}>`);
+      output.push(`<h${level}>${tokenizeInline(heading[2], projectId)}</h${level}>`);
       index += 1;
       continue;
     }
@@ -271,7 +302,7 @@ function renderBlocks(lines) {
     // Setext 标题：上一行文字 + 下一行 === 或 ---。
     if (index + 1 < lines.length && /^\s*(=+|-+)\s*$/.test(lines[index + 1]) && line.trim() && !isBlockStart(lines, index)) {
       const level = lines[index + 1].includes("=") ? 1 : 2;
-      output.push(`<h${level}>${tokenizeInline(line.trim())}</h${level}>`);
+      output.push(`<h${level}>${tokenizeInline(line.trim(), projectId)}</h${level}>`);
       index += 2;
       continue;
     }
@@ -290,19 +321,19 @@ function renderBlocks(lines) {
         quote.push(match[1]);
         index += 1;
       }
-      output.push(`<blockquote>${renderBlocks(quote).join("")}</blockquote>`);
+      output.push(`<blockquote>${renderBlocks(quote, projectId).join("")}</blockquote>`);
       continue;
     }
 
     if (looksLikeTableStart(lines, index)) {
-      const table = renderTable(lines, index, lines.length);
+      const table = renderTable(lines, index, lines.length, projectId);
       output.push(table.html);
       index = table.next;
       continue;
     }
 
     if (LIST_RE.test(line)) {
-      const list = renderList(lines, index, lines.length);
+      const list = renderList(lines, index, lines.length, projectId);
       if (list) {
         output.push(list.html);
         index = list.next;
@@ -330,13 +361,13 @@ function renderBlocks(lines) {
       paragraph.push(lines[index].trim());
       index += 1;
     }
-    if (paragraph.length) output.push(`<p>${paragraph.map(tokenizeInline).join("<br>")}</p>`);
+    if (paragraph.length) output.push(`<p>${paragraph.map(line => tokenizeInline(line, projectId)).join("<br>")}</p>`);
   }
   return output;
 }
 
 /** 将 Markdown 转成安全 HTML；只用于对话气泡等可信容器。 */
-export function renderMarkdown(source) {
+export function renderMarkdown(source, projectId) {
   const lines = String(source ?? "").replace(/\r\n?/g, "\n").split("\n");
-  return renderBlocks(lines).join("");
+  return renderBlocks(lines, projectId).join("");
 }

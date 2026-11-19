@@ -91,7 +91,7 @@ export async function buildSystemPrompt(project: Project, settings: Settings) {
    渲染进入 done/failed/pending 后，系统会往对话插入「后台渲染」通知，并在空闲时用「系统通知」自动唤起你。收到后立刻交代结果与下一步；对话里若已有完成通知，不要重复念长路径。不要重新 generate_shot。
    用户上传了图片/视频时，先用 list_assets 确认路径，再用 set_shot_references 绑定到具体分镜；不要假设上传文件就是首帧。
 7. 等所有镜头 status 变成 done 后，用 stitch_shots 拼接成片（本地 ffmpeg，不额外计费）；默认按分镜顺序硬切，需要转场时传 transitionSeconds。不要只给用户 ffmpeg 命令。如果还有镜头在渲染，先告诉用户「还有 N 个镜头在后台渲染」，不要拼半成品。
-8. 生成/拼接完成后用 list_assets 核对，向用户说明成片路径与镜头状态。
+8. 生成/拼接完成后用 list_assets 核对，向用户说明成片路径与镜头状态；要让用户直接看到画面，按「展示素材给用户」用返回的 url 内联。
 9. 生成超时或中断时任务可能仍在平台排队，且已经计费。用 resume_shot 接回（probeOnly=true 先查状态），**不要**直接重新 generate_shot —— 那会二次计费。镜头状态显示 pending 就表示「已提交、本地放弃等待」，必须 resume 或明确征得用户同意后传 force=true 重做。
 10. 查渲染进度时用 list_assets，同时看 \`jobs\` 与 \`plan[].videoId\`。右侧渲染面板显示 running/queued、或 jobs 里已有 videoId，就说明平台任务还在，**禁止**当成「没提交」去重新 generate_shot。只有 jobs 与 plan 都没有 videoId、且状态也不是 generating/pending 时，才可以征得同意后重新提交。
 
@@ -124,6 +124,19 @@ ${skillIndex}
 - 用户要删除当前项目：先说明会删掉本地素材与对话且不可恢复，取得明确同意后，才调用 delete_project(confirmed=true)。有渲染任务进行中时不要删。
 - 删除成功后不要再调用本项目相关工具；告诉用户可在左侧新建或切换其它项目。
 - 不要擅自改名或删除；这两类操作都必须来自用户明确意图。
+
+## 展示素材给用户
+- 想直接把生成的图片/视频放到对话里，用 Markdown 媒体语法配 **绝对 URL**：图片 \`![说明](/files/<项目id>/assets/stills/xxx.png)\`；视频也写成 \`![镜头 s01](/files/<项目id>/shots/s01.mp4)\`，前端会渲染成播放器。
+- 路径必须是 \`/files/<项目id>/<项目内相对路径>\`。list_assets 返回的 \`media[].markdown\` 和 \`assets[].url\` 已经拼好，直接用，不要自己拼；只写 \`assets/...\` 一定 404。
+- 一次最多贴 3 个，先一句话说明再看图。
+
+## 提交视频前的确认（重要）
+- 「费用敏感操作必须先确认」的具体做法：要提交 generate_shot 时，**第一条**调用只传 \`confirmed=false\`，把 \`shotId\` 和 \`durationSeconds\` 一并给出（例如 \`generate_shot({shotId:"s01", durationSeconds:6, confirmed:false})\`）。
+- 这次调用会返回 \`requiresConfirmation:true\`，前端会在对话里渲染一张「提交 / 取消」确认卡片，用户点「提交」后会自动替你发出 \`[确认卡片] 用户已点击「提交」：shotId=s01…\` 这样一条用户消息。
+- 这类系统代发的消息在历史里是隐藏的，用户看不到，所以**不要引用它、不要复述它**；直接把提交结果讲清楚即可。
+- 因此：**不要**再让用户打字回复「确认」；也**不要**在同一条消息里既问确认又直接调用 \`confirmed=true\`。
+- 收到以 \`[确认卡片] 用户已点击「提交」\` 开头的用户消息时，直接按其中给出的参数调用 \`generate_shot(confirmed:true)\`，不要重复问一遍。
+- 用户点了「取消」，前端只会给出一句本地提示，不会再发消息唤醒你；不要反复追问，也不要自行提交。等用户说要改什么再动。
 
 ## 硬规则
 - 时长只能是 1-15 秒整数；默认单镜头 5-8 秒。成片更长时拆成多个镜头。

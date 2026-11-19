@@ -368,12 +368,12 @@ export const toolSpecs: ToolSpec[] = [
   },
   {
     name: "generate_shot",
-    description: "调用视频后端生成单个镜头视频：icompify 按次计费，本地 GPU 网关免费但占用显存。时长默认取分镜；低于 4 秒时默认按 4 秒生成后本地裁剪，只有 experimentalDuration=true 才直接请求短时长（用于验证 H3 档位）。video.provider=local 时不支持尾帧、参考视频，ref2va 只用第 1 张参考图。必须先向用户展示分镜/提示词并获得明确同意，然后传 confirmed=true。",
+    description: "调用视频后端生成单个镜头视频：icompify 按次计费，本地 GPU 网关免费但占用显存。时长默认取分镜；低于 4 秒时默认按 4 秒生成后本地裁剪，只有 experimentalDuration=true 才直接请求短时长（用于验证 H3 档位）。video.provider=local 时不支持尾帧、参考视频，ref2va 只用第 1 张参考图。确认流程：先以 confirmed=false 调用一次，前端会弹出「提交/取消」确认卡片，用户点击后会自动发出确认消息，此时再传 confirmed=true。",
     parameters: {
       type: "object",
       properties: {
         shotId: { type: "string" },
-        confirmed: { type: "boolean", description: "用户已明确同意生成" },
+        confirmed: { type: "boolean", description: "false = 只申请用户确认（前端弹确认卡片，不产生费用）；true = 用户已点击「提交」后真正开始生成" },
         promptOverride: { type: "string", description: "可选，直接使用该提示词" },
         durationSeconds: { type: "number", description: "可选，覆盖分镜时长；1-15 秒整数" },
         experimentalDuration: { type: "boolean", description: "低于 4 秒时是否直接请求 H3；默认 false，按 4 秒生成后裁剪" },
@@ -761,7 +761,19 @@ async function buildPrompt(ctx: ToolContext, args: Args) {
 async function generateShotTool(ctx: ToolContext, args: Args) {
   const shotId = reqString(args, "shotId");
   if (args.confirmed !== true) {
-    return { ok: false, error: "生成视频会产生费用。请先向用户展示分镜和提示词，取得明确同意后，再以 confirmed=true 调用。" };
+    // 不是错误：前端据此渲染「提交/取消」确认卡片，用户点击后自动发出确认消息。
+    const pendingShot = ctx.project.plan.find(item => item.id === shotId);
+    return {
+      ok: true,
+      requiresConfirmation: true,
+      shotId,
+      title: pendingShot?.title,
+      durationSeconds: optNumber(args, "durationSeconds") ?? pendingShot?.durationSeconds,
+      promptOverride: optString(args, "promptOverride"),
+      experimentalDuration: args.experimentalDuration === true,
+      skillIds: args.skillIds === undefined ? pendingShot?.skillIds : stringArray(args, "skillIds"),
+      note: "尚未提交、未产生费用。前端会显示确认卡片；用户点击「提交」后会自动发来确认消息，届时用 confirmed=true 调用本工具。",
+    };
   }
   const shot = ctx.project.plan.find(item => item.id === shotId);
   // 内存里已有 running job（即便盘上 videoId 被旧快照抹掉）也不允许再提交。
@@ -845,7 +857,10 @@ async function generateStillTool(ctx: ToolContext, args: Args) {
 }
 
 async function listAssets(ctx: ToolContext) {
-  const jobs = listJobs(ctx.project.id).map(job => ({
+  const projectId = ctx.project.id;
+  // 把项目内相对路径补成浏览器可用的 /files 绝对 URL，模型直接 `![](url)` 就能内联展示。
+  const url = (path?: string | null) => (path ? `/files/${encodeURIComponent(projectId)}/${path.split("/").map(encodeURIComponent).join("/")}` : "");
+  const jobs = listJobs(projectId).map(job => ({
     id: job.id,
     shotId: job.shotId,
     status: job.status,
@@ -857,12 +872,22 @@ async function listAssets(ctx: ToolContext) {
   return {
     ok: true,
     stage: ctx.project.stage,
-    assets: ctx.project.assets.slice(-40),
+    projectId,
+    // media 是可直接内联的 Markdown 片段；直接复核这里的路径最省事。
+    media: ctx.project.assets.slice(-40).map(asset => ({
+      kind: asset.kind,
+      path: asset.path,
+      label: asset.label,
+      url: url(asset.path),
+      markdown: `![${asset.label || asset.path}](${url(asset.path)})`,
+    })),
+    assets: ctx.project.assets.slice(-40).map(asset => ({ ...asset, url: url(asset.path) })),
     plan: ctx.project.plan.map(shot => ({
       id: shot.id,
       title: shot.title,
       status: shot.status,
       video: shot.video,
+      videoUrl: url(shot.video),
       videoId: shot.videoId,
       promptMode: shot.promptMode,
       firstFrame: shot.firstFrame,

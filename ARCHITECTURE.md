@@ -201,6 +201,37 @@ planned → promptReady → generating → done
 - `generate_shot` 遇到 `shot.videoId` 存在且 `status !== "done"` 会直接拒绝，提示改用 `resume_shot`；确实要丢弃旧任务才传 `force=true`。
 - `maxWaitMs` 默认 120 分钟，仅作兜底；真正的恢复手段是 `resume_shot`。
 
+### 气泡里展示素材
+
+Agent 不能直接把字节塞进消息，只能让前端渲染项目内文件。约定：助手气泡里的 Markdown 媒体语法 + `/files` 绝对 URL。
+
+- **唯一可用 URL 形态**：`/files/<urlEncode(项目id)>/<项目内相对路径>`。裸相对路径（`assets/stills/x.png`）在浏览器里会解析成站点根、必 404；`markdown.ts:safeMediaUrl` 会在有 `projectId` 时自动补成上面的绝对形态，但后端提示词仍要求模型直接用绝对 URL。
+- **`list_assets` 负责拼 URL**：返回 `projectId`、`media[]`（含拼好的 `markdown` 片段）、`assets[].url`、`plan[].videoUrl`。模型复制 `media[].markdown` 即可，不需要自己拼。
+- **前端按扩展名降级**：`![x](a.mp4)` → `<video controls>`，音频 → `<audio>`，其余 → `<img>`。所有媒体带 `data-media-src`，由 `ChatPane` 的点击代理打开 `MediaDialog` 大图/播放器。
+- **表格里的图片可用**：`splitTableRow` 先把 `](...)` 内的 `|` 换成占位符，避免表格切碎图片语法。
+- **后台渲染完成通知带附件卡片**：`renderWake.notifyRenderJobTerminal` 在 `done` 时给事件补 `attachments: [{ path, kind: "video" }]`，前端走 `BubbleAttachment`（缩略图/▶+文件名），不依赖模型是否记得贴图。
+- **安全边界**：`safeUrl` 仍拒绝 `javascript:` 等伪协议与 `//host`；只放行 `http(s)`、`mailto`、`/`、`./`、`#` 和无协议相对路径。
+
+模型侧说明在 `agent/prompt.ts` 的「展示素材给用户」一节；这条通道不新增工具，也不产生额外费用。
+
+### 计费操作的确认卡片
+
+`generate_shot` 的「先确认再计费」不再依赖用户打字说"确认"，而是渲染成对话里的一张卡片。
+
+```
+Agent 调 generate_shot({shotId, durationSeconds, confirmed:false})
+  → tools.ts 返回 { ok:true, requiresConfirmation:true, shotId, title, durationSeconds }
+  → loop.ts:confirmationRequest() 追加一条 { type:"confirmation", action:"submit_shot" } 事件
+  → App.tsx 渲染「提交生成 / 取消」卡片
+  → 点「提交」→ 前端发一条以 [确认卡片] 开头的用户消息
+  → Agent 按消息里的参数调 generate_shot(confirmed:true) → startRenderJob()
+```
+
+- **`confirmed=false` 不是错误**：返回 `ok:true` + `requiresConfirmation`，不产生任何费用，也不会占用镜头任务。
+- **提交消息对前端隐藏**：`server.ts:historyMessages` 与 `App.tsx:sendMessage` 都按 `[确认卡片]` 前缀过滤，和 `[系统通知]` 同一口径；刷新后卡片不重建（用户只需重新要求提交）。
+- **双击保护**：`confirmSubmitRef` 占位，只允许一个提交在飞。这是全项目唯一触发 `confirmed=true` 的入口。
+- **点「取消」不唤醒模型**：只本地置灰卡片并提示未产生费用，避免无意义的 LLM 轮次。
+
 ## 数据模型
 
 `Project`（`project.json`）是唯一状态源：
@@ -237,10 +268,10 @@ planned → promptReady → generating → done
 | `set_shot_references` | 把项目内图片/视频绑定到分镜（Ref2VA/I2VA/FL2VA） | 无 |
 | `build_shot_prompt` | 生成并校验 H3 提示词 | 文本模型 |
 | `generate_still` | 定妆照/场景照（本地 GPU / 远程接口 / 回退参考帧） | 本地免费；远程按张计费 |
-| `generate_shot` | H3 生成单镜（需确认；已有未完成任务时会拒绝，除非 `force=true`） | icompify 按次计费；本地网关免费 |
+| `generate_shot` | H3 生成单镜（`confirmed=false` 只弹确认卡片，`true` 才提交；已有未完成任务时会拒绝，除非 `force=true`） | icompify 按次计费；本地网关免费 |
 | `resume_shot` | 接回已提交但本地放弃等待的任务（`probeOnly` 只查状态） | 无（任务已计费） |
 | `stitch_shots` | 统一转码后拼接分镜（硬切/叠化），输出成片 | 无（本地 ffmpeg） |
-| `list_assets` | 查看状态 | 无 |
+| `list_assets` | 查看状态；返回可直接内联的 `media[].markdown` / `assets[].url` | 无 |
 | `list_style_packs` | 查看风格包 | 无 |
 | `apply_style_pack` | 套用风格包并复制引用素材 | 无 |
 | `set_stage` | 更新阶段 | 无 |

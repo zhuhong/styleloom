@@ -205,6 +205,14 @@ export type ChatItem =
       kind: "tool";
       id: string;
       card: ToolCardState;
+    }
+  | {
+      kind: "confirm";
+      id: string;
+      shotId: string;
+      title: string;
+      durationSeconds?: number;
+      status: "pending" | "submitted" | "declined";
     };
 
 export type MediaRequest = {

@@ -33,6 +33,22 @@ function sanitizeMessages(messages: LlmMessage[]) {
   return output;
 }
 
+/** 工具返回「需要用户确认」时，转成前端可渲染的确认事件；目前只有 generate_shot 走这条路。 */
+function confirmationRequest(name: string, payload: unknown): AgentEvent | undefined {
+  if (name !== "generate_shot") return undefined;
+  if (!payload || typeof payload !== "object") return undefined;
+  const data = payload as { requiresConfirmation?: unknown; shotId?: unknown; title?: unknown; durationSeconds?: unknown };
+  if (data.requiresConfirmation !== true || typeof data.shotId !== "string") return undefined;
+  return {
+    type: "confirmation",
+    id: `confirm-${data.shotId}`,
+    action: "submit_shot",
+    shotId: data.shotId,
+    title: typeof data.title === "string" ? data.title : data.shotId,
+    durationSeconds: typeof data.durationSeconds === "number" ? data.durationSeconds : undefined,
+  };
+}
+
 function attachmentBlock(attachments: ChatAttachment[]) {
   const lines = attachments.map(attachment => `- ${attachment.kind === "image" ? "图片" : "视频"}：${attachment.path}${attachment.label ? `（原始文件名：${attachment.label}）` : ""}`);
   return `[用户上传素材]\n${lines.join("\n")}\n这些是项目内相对路径；需要作为参考时，用 list_assets 查看，再用 set_shot_references 绑定到具体分镜（图片 role=subject/location，视频放 videos；首帧/尾帧用 firstFrame/lastFrame）。`;
@@ -128,6 +144,9 @@ export async function runAgentTurn(
           payload = { ok: false, error: error instanceof Error ? error.message : String(error) };
         }
         const serialized = JSON.stringify(payload);
+        // 需要用户确认的计费操作：额外推一条结构化事件，前端渲染提交/取消按钮。
+        const confirmation = confirmationRequest(call.function.name, payload);
+        if (confirmation) emit(confirmation);
         emit({ type: "tool_end", id: callId, name: call.function.name, ok, preview: serialized.slice(0, 800), elapsedMs: Date.now() - startedAt });
         messages.push({
           role: "tool",

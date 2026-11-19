@@ -88,7 +88,10 @@ async function drainWakeQueue(projectId: string) {
 export async function notifyRenderJobTerminal(job: RenderJob) {
   if (job.status !== "done" && job.status !== "failed" && job.status !== "pending") return;
   const content = noticeText(job);
-  broadcastProjectAgentEvent(job.projectId, { type: "message", role: "assistant", content });
+  const attachments = job.status === "done" && job.video
+    ? [{ path: job.video, label: `${job.shotId} 成片`, kind: "video" as const }]
+    : undefined;
+  broadcastProjectAgentEvent(job.projectId, { type: "message", role: "assistant", content, attachments });
   await appendAssistantNotice(job.projectId, content).catch(() => undefined);
   enqueueJob(job);
   void drainWakeQueue(job.projectId);

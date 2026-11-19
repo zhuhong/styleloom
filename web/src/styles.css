@@ -194,6 +194,9 @@ code { background: #1f2733; padding: 1px 5px; border-radius: 5px; font-size: 12p
 .bubble.assistant.markdown strong { color: #e6edf3; font-weight: 600; }
 .bubble.assistant.markdown del { opacity: 0.65; }
 .bubble.assistant.markdown .mdImage { display: block; max-width: 100%; max-height: 320px; margin: 8px 0; border-radius: 8px; object-fit: contain; }
+.bubble.assistant.markdown img.mdImage { cursor: zoom-in; }
+.bubble.assistant.markdown .mdVideo { width: 100%; height: auto; background: #0a0c10; }
+.bubble.assistant.markdown .mdAudio { display: block; width: 100%; max-width: 320px; margin: 8px 0; }
 .bubble.assistant.markdown .mdCode { max-width: 100%; max-height: 360px; margin: 8px 0; padding: 10px 12px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: #0d1117; }
 .bubble.assistant.markdown .mdCode code { display: block; padding: 0; border-radius: 0; background: transparent; color: #d7e0ea; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.55; white-space: pre; }
 .bubble.assistant.markdown .mdInline { padding: 1px 5px; border-radius: 5px; background: #1f2733; color: #d7e0ea; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
@@ -220,6 +223,31 @@ code { background: #1f2733; padding: 1px 5px; border-radius: 5px; font-size: 12p
 .progress i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width 0.3s; }
 .progressLabel { margin-top: 5px; color: var(--muted); font-size: 11px; }
 .progressLabel.panelHint { color: #7dd3fc; }
+
+/* 计费操作确认卡片：提交前唯一需要用户点一下的地方 */
+.confirmCard {
+  align-self: flex-start;
+  width: min(100%, 480px);
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent2);
+  border-radius: 10px;
+  background: var(--panel2);
+  font-size: 12px;
+}
+.confirmCard[data-status="submitted"] { border-left-color: var(--accent); }
+.confirmCard[data-status="declined"] { border-left-color: var(--muted); opacity: 0.75; }
+.confirmHead { display: flex; align-items: center; gap: 8px; color: var(--text); font-weight: 500; }
+.confirmShot { padding: 1px 6px; border-radius: 5px; background: #1f2733; color: #7dd3fc; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.confirmBody { margin-top: 6px; color: var(--text); }
+.confirmMeta { margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.confirmActions { display: flex; gap: 8px; margin-top: 10px; }
+.confirmActions button { padding: 6px 14px; border-radius: 7px; border: 1px solid var(--line); font-size: 12px; cursor: pointer; }
+.confirmActions button:disabled { opacity: 0.5; cursor: not-allowed; }
+.confirmPrimary { border-color: transparent !important; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #06232b; font-weight: 600; }
+.confirmSecondary { background: transparent; color: var(--muted); }
+.confirmSecondary:hover { color: var(--text); }
+.confirmSettled { margin-top: 8px; color: var(--muted); font-size: 11px; }
 
 .jobCard { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; background: var(--panel); }
 .jobCard.running { border-color: #3a6b5c; }

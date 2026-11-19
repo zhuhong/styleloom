@@ -205,6 +205,16 @@ export async function saveManifest(project: Project, manifest: SliceManifest) {
 }
 
 export function addAsset(project: Project, asset: Omit<AssetRecord, "id" | "createdAt">): AssetRecord {
+  // 同路径重复登记会让右侧素材栏出现重复卡片；只在路径变化时追加，否则更新标签/元信息。
+  // 迁移遗留的重复登记（同路径多条）：保留最后一条，避免素材栏重复。
+  project.assets = project.assets.filter((item, index, all) => all.findIndex(other => other.path === item.path) === index);
+  const existing = project.assets.find(item => item.path === asset.path);
+  if (existing) {
+    if (asset.label) existing.label = asset.label;
+    if (asset.kind) existing.kind = asset.kind;
+    if (asset.meta) existing.meta = { ...existing.meta, ...asset.meta };
+    return existing;
+  }
   const record: AssetRecord = { ...asset, id: crypto.randomUUID().slice(0, 8), createdAt: nowIso() };
   project.assets.push(record);
   return record;
@@ -212,6 +222,32 @@ export function addAsset(project: Project, asset: Omit<AssetRecord, "id" | "crea
 
 export async function projectExists(id: string) {
   return exists(projectFile(id));
+}
+
+/**
+ * 启动时的轻量修复：修正 assets[] 的重复登记与磁盘缺失项。
+ * 只做保守处理——同路径去重（保留最后一条）、已不存在的文件条目标记而非删除，避免破坏历史引用。
+ */
+export async function reconcileProjectAssets(id: string): Promise<{ deduped: number; missing: string[] }> {
+  const project = await readJsonIfExists<Project>(projectFile(id));
+  if (!project?.assets?.length) return { deduped: 0, missing: [] };
+
+  const seen = new Map<string, AssetRecord>();
+  for (const asset of project.assets) seen.set(asset.path, asset);
+  const deduped = project.assets.length - seen.size;
+
+  const missing: string[] = [];
+  for (const asset of seen.values()) {
+    if (!(await exists(join(projectDir(id), asset.path)))) missing.push(asset.path);
+  }
+
+  if (deduped > 0) {
+    // 保持原有出现顺序，只是去掉同路径的旧记录。
+    const order = [...new Set(project.assets.map(asset => asset.path))];
+    project.assets = order.map(path => seen.get(path)!).filter(Boolean);
+    await writeJson(projectFile(id), project);
+  }
+  return { deduped, missing };
 }
 
 /** 只改标题，不改目录 id（引用/会话路径保持稳定）。 */

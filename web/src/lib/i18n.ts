@@ -36,6 +36,15 @@ const dictionaries: Record<Lang, Dict> = {
     "chat.emptyXhs": "也可以直接粘贴小红书笔记链接（带 xsec_token 的完整 URL），我会先下载再拉片。",
     "chat.emptyFlow": "学习流程：ffmpeg 切片 → 视觉模型逐镜头拉片 → 归纳定妆照、场景照、运镜与节奏 → H3 生成。",
 
+    "chat.confirmTitle": "提交视频生成",
+    "chat.confirmCost": "H3 按次计费 · 时长 {duration} · 提交后开始渲染，进度见右侧「渲染」面板",
+    "chat.confirmDurationUnknown": "取分镜默认值",
+    "chat.confirmSubmit": "提交生成",
+    "chat.confirmCancel": "取消",
+    "chat.confirmSubmitted": "已提交，正在渲染…",
+    "chat.confirmDeclinedShort": "已取消，不会产生费用",
+    "chat.confirmDeclined": "已取消镜头 {shot} 的提交，未产生费用。想改哪里直接说。",
+
     "composer.attachTitle": "上传参考图片或视频",
     "composer.placeholder": "和 Agent 沟通：上传参考图/视频，或提供创作想法、修改意见…",
     "composer.hint": "Enter 发送 · Shift+Enter 换行 · 可拖入图片/视频作为参考 · 生成会产生 H3 费用，Agent 会先征得确认",
@@ -326,6 +335,15 @@ const dictionaries: Record<Lang, Dict> = {
     "chat.emptyExample": "e.g. Study the camera moves and lighting of <code>/Users/you/Movies/reference.mp4</code> and make an 8-second rainy-night street shot.",
     "chat.emptyXhs": "You can also paste a Xiaohongshu note URL (the full URL including xsec_token); I'll download it first, then break it down.",
     "chat.emptyFlow": "Learning flow: ffmpeg slicing → vision model shot-by-shot breakdown → distill stills, locations, camera grammar and rhythm → H3 generation.",
+
+    "chat.confirmTitle": "Submit video render",
+    "chat.confirmCost": "H3 bills per render · duration {duration} · rendering starts right after you submit; progress shows in the Render panel",
+    "chat.confirmDurationUnknown": "shot default",
+    "chat.confirmSubmit": "Submit",
+    "chat.confirmCancel": "Cancel",
+    "chat.confirmSubmitted": "Submitted, rendering…",
+    "chat.confirmDeclinedShort": "Cancelled — nothing was charged",
+    "chat.confirmDeclined": "Cancelled the submission for {shot} — nothing was charged. Tell me what to change.",
 
     "composer.attachTitle": "Upload a reference image or video",
     "composer.placeholder": "Talk to the agent: upload reference images/videos, or share ideas and revision notes…",

@@ -2,7 +2,7 @@ import { basename, extname, join } from "node:path";
 import { writeFile } from "node:fs/promises";
 import { dataDir, loadSettings, maskSettings, preserveSecrets, saveSettings, settingsPath, webDir, defaultSettings } from "./config";
 import { ensureDir, exists, readJsonIfExists, safeJoin, slugify, stamp } from "./util/fs";
-import { addAsset, createProject, deleteProject, getManifest, getProject, listProjects, mutateProject, projectDir, readSession, renameProject, saveProject } from "./store/projects";
+import { addAsset, createProject, deleteProject, getManifest, getProject, listProjects, mutateProject, projectDir, readSession, reconcileProjectAssets, renameProject, saveProject } from "./store/projects";
 import { listStylePacks } from "./store/library";
 import { getSkill, listSkills, recordSkillOutcome, recordSkillOutcomesForShot, searchSkills, skillEvidenceFile, skillToMarkdown, skillToSummary, updateSkill } from "./store/skills";
 import type { ChatAttachment, Project, SkillKind } from "./types";
@@ -25,10 +25,10 @@ function historyMessages(messages: LlmMessage[]) {
   return messages
     .filter(message => (message.role === "user" || message.role === "assistant")
       && ((typeof message.content === "string" && message.content.trim()) || message.attachments?.length))
-    // 渲染完成自动唤醒的用户消息只给模型看，不回放到聊天气泡。
+    // 渲染完成自动唤醒的用户消息、确认卡片代发的用户消息只给模型看，不回放到聊天气泡。
     .filter(message => !(message.role === "user"
       && typeof message.content === "string"
-      && message.content.startsWith("[系统通知]")))
+      && (message.content.startsWith("[系统通知]") || message.content.startsWith("[确认卡片]"))))
     .map(message => ({
       role: message.role,
       content: typeof message.content === "string" ? message.content : "",
@@ -81,9 +81,14 @@ async function serveStatic(pathname: string) {
 
 async function serveProjectFile(projectId: string, relative: string) {
   await getProject(projectId);
-  const path = safeJoin(projectDir(projectId), decodeURIComponent(relative));
-  if (!(await exists(path))) return new Response("Not found", { status: 404 });
-  return new Response(Bun.file(path));
+  const decoded = decodeURIComponent(relative);
+  const path = safeJoin(projectDir(projectId), decoded);
+  if (await exists(path)) return new Response(Bun.file(path));
+  // 兼容带空格/中文/特殊字符的文件名：前端按段 encodeURIComponent 过，但模型或旧数据可能只编码了一部分。
+  const fallback = safeJoin(projectDir(projectId), decodeURIComponent(decodeURIComponent(relative)));
+  if (fallback !== path && (await exists(fallback))) return new Response(Bun.file(fallback));
+  // 静态资源走严格 404 缓存，避免浏览器把 404 缓存住后即使文件补上也不刷新。
+  return new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } });
 }
 
 function chatStream(projectId: string, message: string, attachments: ChatAttachment[] = []) {
@@ -196,6 +201,17 @@ setRenderTerminalHook(job => {
 });
 const repairedJobs = await reconcileStaleJobs().catch(() => [] as string[]);
 if (repairedJobs.length) console.log(`[reconcile] 修正遗留渲染状态：${repairedJobs.join("、")}`);
+// 素材栏丢图多半是 assets[] 重复登记或被外部删除；启动时清理并打印可疑条目，方便定位。
+{
+  const projectIds = (await listProjects().catch(() => [])).map(project => project.id);
+  const assetIssues: string[] = [];
+  for (const id of projectIds) {
+    const { deduped, missing } = await reconcileProjectAssets(id).catch(() => ({ deduped: 0, missing: [] as string[] }));
+    if (deduped) assetIssues.push(`${id} 去掉 ${deduped} 条重复素材`);
+    if (missing.length) assetIssues.push(`${id} 缺失文件 ${missing.length} 个：${missing.slice(0, 3).join("、")}${missing.length > 3 ? "…" : ""}`);
+  }
+  if (assetIssues.length) console.log(`[reconcile] 素材索引：${assetIssues.join("；")}`);
+}
 const ffmpegCheck = await runProcess([settings.ffmpeg.ffmpegPath, "-version"]).catch(() => undefined);
 if (!ffmpegCheck || ffmpegCheck.code !== 0) {
   console.warn(`[warn] 找不到 ffmpeg（${settings.ffmpeg.ffmpegPath}），学习功能将不可用`);

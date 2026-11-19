@@ -64,6 +64,11 @@ export function App() {
 
   const projectRef = useRef<Project | null>(null);
   const streamingRef = useRef(false);
+  /**
+   * 确认卡片占位。用 ref 而不是 state：避免把「按钮刚点过」这种瞬时状态写进依赖数组，
+   * 也避免状态的批量更新还没落地时双击就通过了判断。
+   */
+  const confirmSubmitRef = useRef(false);
   const handleEventRef = useRef<(event: Record<string, unknown>) => void>(() => {});
   const jobsSourceRef = useRef<EventSource | null>(null);
   /** 所有存活的 EventSource。切项目/重连时全关，避免残留连接用旧项目的 job 覆盖面板。 */
@@ -383,6 +388,22 @@ export function App() {
       pushBubble("assistant", String(event.content ?? ""), (event.attachments as ChatAttachment[]) || []);
       return;
     }
+    if (event.type === "confirmation") {
+      const shotId = String(event.shotId ?? "");
+      if (!shotId) return;
+      const id = String(event.id ?? `confirm-${shotId}`);
+      setChatItems(items => items.some(item => item.kind === "confirm" && item.id === id)
+        ? items
+        : [...items, {
+          kind: "confirm",
+          id,
+          shotId,
+          title: String(event.title ?? shotId),
+          durationSeconds: typeof event.durationSeconds === "number" ? event.durationSeconds : undefined,
+          status: "pending",
+        }]);
+      return;
+    }
     if (event.type === "tool_start") {
       const card: ToolCardState = {
         id: String(event.id),
@@ -475,7 +496,8 @@ export function App() {
       return;
     }
     setStreaming(true);
-    pushBubble("user", message, attachments);
+    // 确认卡片代发的消息不进气泡（与历史回放口径一致：以 [确认卡片] 开头的用户消息对前端隐藏）。
+    if (!message.startsWith("[确认卡片]")) pushBubble("user", message, attachments);
     try {
       const response = await fetch(`/api/projects/${encodeURIComponent(current.id)}/chat`, {
         method: "POST",
@@ -589,6 +611,39 @@ export function App() {
     clearPendingUploads();
     void sendMessage(message, attachments);
   }, [clearPendingUploads, sendMessage]);
+
+  /** 确认卡片的提交占位：同一时刻只允许一个提交在飞，避免双击触发两次计费。 */
+  const tryStartConfirmSubmit = useCallback(() => {
+    if (confirmSubmitRef.current || streamingRef.current) return false;
+    confirmSubmitRef.current = true;
+    return true;
+  }, []);
+
+  /**
+   * 确认卡片：点「提交」时用一条隐藏的用户消息唤醒 Agent 真正调用 generate_shot(confirmed=true)。
+   * 消息以 [确认卡片] 开头，历史回放时会被 server.ts:historyMessages 过滤掉。
+   */
+  const handleConfirmSubmit = useCallback((item: { id: string; shotId: string; title: string; durationSeconds?: number }) => {
+    // 双击/并发保护：确认卡片提交是计费入口，必须先占位成功再发消息。
+    if (!tryStartConfirmSubmit()) return;
+    setChatItems(items => items.map(entry => (
+      entry.kind === "confirm" && entry.id === item.id ? { ...entry, status: "submitted" } : entry
+    )));
+    const duration = item.durationSeconds ? `，durationSeconds=${item.durationSeconds}` : "";
+    void sendMessage(
+      `[确认卡片] 用户已点击「提交」：shotId=${item.shotId}${duration}。请立刻用 generate_shot(confirmed=true) 提交，不要重新问确认。`,
+      [],
+    ).finally(() => {
+      confirmSubmitRef.current = false;
+    });
+  }, [sendMessage, tryStartConfirmSubmit]);
+
+  const handleConfirmDecline = useCallback((item: { id: string; shotId: string }) => {
+    setChatItems(items => items.map(entry => (
+      entry.kind === "confirm" && entry.id === item.id ? { ...entry, status: "declined" } : entry
+    )));
+    pushBubble("assistant", t("chat.confirmDeclined", { shot: item.shotId }), [], true);
+  }, [pushBubble]);
 
   const handleNewProject = useCallback(async () => {
     const title = window.prompt(t("misc.newProjectPromptTitle"), t("misc.newProjectDefaultTitle"));
@@ -754,6 +809,8 @@ export function App() {
           }}
           onOpenMedia={setMedia}
           onFilesDropped={files => void uploadFiles(files)}
+          onConfirmSubmit={handleConfirmSubmit}
+          onConfirmDecline={handleConfirmDecline}
         />
 
         <Inspector
