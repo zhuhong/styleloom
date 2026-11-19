@@ -68,7 +68,7 @@ StyleLoom 默认走云端：图片走远程图片接口，视频走 icompify。�
 
 | 字段 | 说明 |
 | --- | --- |
-| `api` | `local` 只用本地；`auto` 本地优先、不可用回退远程；`openrouter`/`openai` 只用远程 |
+| `api` | `icompify`（默认，云端出图）; `local` 只用本地；`auto` 本地优先、不可用回退远程；`openrouter`/`openai` 只用远程 |
 | `mode` | 见上表 |
 | `host` | SSH 主机别名或 `user@host`；直连不需要 |
 | `pythonBin` | 解释器路径。若只有命令名（如 `python3`）也可以，会用 `Bun.which` 解析 |
@@ -126,7 +126,7 @@ bun -e 'import { probeLocalImage } from "./src/providers/imageCheck"; console.lo
 
 有就通过 `--ref` 传给脚本。这是 text-encoder 的 vision 条件通道，不做 img2img 加噪，所以人物、服装、背景能保留，只按 prompt 改姿态。
 
-远程图片接口（`openrouter` / `openai`）只按文生图使用，不吃条件图。
+远程图片接口（`icompify` / `openrouter` / `openai`）只按文生图使用，不吃条件图。
 
 ---
 

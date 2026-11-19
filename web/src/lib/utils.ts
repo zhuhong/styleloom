@@ -94,6 +94,10 @@ export function skillKindLabel(kind: string) {
   return labelOr(`skillKind.${kind}`, kind);
 }
 
+export function skillSurfaceLabel(surface: string) {
+  return labelOr(`skillSurface.${surface}`, surface);
+}
+
 export function shotStatusLabel(status: string) {
   return labelOr(`shotStatus.${status}`, status);
 }

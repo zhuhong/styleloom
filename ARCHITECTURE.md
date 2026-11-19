@@ -81,6 +81,15 @@ SSE 事件：`message`、`tool_start`、`progress`、`tool_end`、`state`、`err
 - 复制证据关键帧到 `data/skills/<id>/evidence/`，项目删除后技能仍可读。
 - LLM 失败退回规则版：运镜语法、灯光、调色、节奏、风格前缀、避坑清单。
 - 技能抽取失败不影响学习结果，只写 warning。
+- **出图技能**由 `learn/stillSkills.ts` 直接从风格圣经派生（不额外调模型）：定妆照基准（全身完整 + 无缝背景 + 中性光）、场景照基准（空景 + 陈设层次）、出图避坑（文字/水印/裁切）。它们走同一套证据、合并与反馈管线，只是 `kind=still` / `appliesTo=["still"]`。
+
+### 技能作用面（video / still）
+
+`Skill.appliesTo` 决定技能能进哪种提示词：`video` = H3 分镜提示词，`still` = 定妆照 / 场景照的出图提示词。
+
+- 老技能没有这个字段时按 kind 推断：`camera / rhythm / sound / composition / prompt` 只算 `video`（构图与提示词类技能写的是参考片的具体景别与 H3 锚点，拼进静帧会灌进无关细节）；`still` 只算 `still`；`lighting / color / workflow / avoid` 两端通用。
+- `searchSkills(..., { surface })` 与 `skillPromptInjection(skills, { surface })` 都按作用面过滤。
+- `generate_still` 不传 `skillIds` 时自动检索（`surface=still`、`kind=still` 优先、人物/场景互斥、忽略无 `promptFragment` 的技能），把片段剥掉重复的 `stylePrefix` 后拼在 `stillPrompt` 之后；技能里的 `avoidWhen` 是「什么情况下别用这条技能」，不是负面提示词，因此不写进图片提示词。出图成功后 `markSkillUsed` 记使用（公开技能只读、不写回）。
 
 ### 技能生命周期
 
@@ -97,7 +106,7 @@ SSE 事件：`message`、`tool_start`、`progress`、`tool_end`、`state`、`err
 升降级看的是 `projectId` 去重后的证据项目数，不是证据条数；`markSkillUsed` 只记使用次数，不伪造证据。
 LLM 自评不直接进入置信度，必须靠独立证据或真实反馈。
 
-Agent 在规划前 `search_skills`、命中后 `read_skill`；`plan_shots` 记录 `skillIds`，`build_shot_prompt` / `generate_shot` 按 `skillIds` 自动注入 `promptFragment` 与 `avoidWhen`。生成后可由右侧面板或 `record_skill_outcome` 回写反馈。
+Agent 在规划前 `search_skills`、命中后 `read_skill`；`plan_shots` 记录 `skillIds`，`build_shot_prompt` / `generate_shot` 按 `skillIds` 自动注入 `promptFragment` 与 `avoidWhen`。生成定妆照/场景照时 `generate_still` 同样按 `skillIds`（或自动检索）注入出图技能。生成后可由右侧面板或 `record_skill_outcome` 回写反馈；出图技能的 `shotId` 约定写成 `still:<target>:<id>`。
 
 ### 为什么用「风格圣经」而不是向量库
 
@@ -204,7 +213,7 @@ planned → promptReady → generating → done
 
 `SliceManifest`（`learning/slice.json`）保存每个镜头的时间、关键帧、采样、片段与标注。分镜只存 `referenceShotIds`，不复制片段。
 
-`Skill`（`data/skills/<id>/skill.json`）是全局资产：规则、prompt fragment、证据（项目/镜头/证据图）、反馈、置信度、状态、版本与修订历史。`SKILL.md` 由 JSON 生成，便于人和 Agent 阅读。
+`Skill`（`data/skills/<id>/skill.json`）是全局资产：规则、prompt fragment、作用面（`appliesTo`：video / still）、证据（项目/镜头/证据图）、反馈、置信度、状态、版本与修订历史。`SKILL.md` 由 JSON 生成，便于人和 Agent 阅读。
 
 公开技能库 `skills/<id>/` 是另一层：只存 kind/name/summaryZh/instruction/promptFragment/applicableWhen/avoidWhen/tags/version 等**可分发知识**，无证据图（第三方版权）、无反馈与置信度。运行时 `searchSkills` / `readSkillResolved` 合并本机 `data/skills/` 与公开 `skills/`，同 id 时本机覆盖公开；公开条目 hydrate 成默认 `candidate / 0.32`，不写回、不记反馈。`export_skills` 负责把本机技能剥离私有字段后导出到 `skills/`。
 
@@ -242,7 +251,7 @@ planned → promptReady → generating → done
 
 - **换文本/视觉模型**：只改 `settings.json`。任何 OpenAI 兼容网关都能用；工具调用需要网关支持 `tools`。
 - **换视频供应商**：`providers/video/index.ts` 按 `video.provider` 分流；新增后端实现同签名 `generateVideoJob` 并注册分支即可。
-- **换图片供应商**：`providers/image.ts` 有 OpenAI `/images/generations`、OpenRouter `/images`、本地 GPU（`direct` 本机 spawn / `ssh` 远端调脚本）三类，通过 `image.api` 与 `image.local.mode` 切换；统一返回 `{ bytes, mimeType, model, backend }`。
+- **换图片供应商**：`providers/image.ts` 有 icompify（SGLang chat 多模态 `/v1/chat/completions`，默认）、OpenAI `/images/generations`、OpenRouter `/images`、本地 GPU（`direct` 本机 spawn / `ssh` 远端调脚本）四类，通过 `image.api` 与 `image.local.mode` 切换；统一返回 `{ bytes, mimeType, model, backend }`。远程后端由 `remoteImageBackend` 从 `api` 或 `baseUrl` 推断，`remoteImageReady` 统一判定是否可用（icompify 无 Key 视为未配置）。
 - **本机出图链路**：`localImageMode` 按 `image.local.mode` 选直连或 SSH；`resolveImageBackend` 决定本机/远端/回退。直连直接 `Bun.spawn` 脚本并读临时产物；SSH 则 `withRemoteWorkdir` 建远端目录 → `scpToRemote` 传条件图 → `sshRun` 执行脚本 → `fetchRemoteFile` 拉回 PNG → `finally` 删除远端目录。仍然「一张一进程」，不做任务排队；需要批量时在 GPU 侧自行批量。
 - **本地视频链路**：`video.provider=local` 时 `providers/video/local.ts` 调自建网关（契约见 [docs/local-gpu.md](docs/local-gpu.md)）：`POST /v1/jobs` → 轮询 `GET /v1/jobs/{id}`（透传 progress/log）→ `GET /v1/jobs/{id}/file` 下载 mp4；取消时先 `DELETE` 再抛错。网关单 worker 串行，出图与出片不能并发；本地只支持 t2va/i2va/ref2va（ref2va 单张参考图），不支持尾帧与参考视频。
 - **加镜头技能**（例如口型、音乐、转场）：新工具 + `agent/prompt.ts` 里的流程说明；重活放到 `src/generate/`。

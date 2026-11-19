@@ -5,7 +5,7 @@ import { ensureDir, exists } from "../util/fs";
 import { runProcess } from "../util/ffmpeg";
 import { fetchRemoteFile, scpToRemote, shellQuote, sshReachable, sshRun, withRemoteWorkdir } from "../util/ssh";
 
-export type ImageBackend = "openrouter" | "openai" | "local";
+export type ImageBackend = "icompify" | "openrouter" | "openai" | "local";
 
 export type ImageResult = {
   bytes: Uint8Array;
@@ -126,10 +126,10 @@ export async function resolveImageBackend(
 ): Promise<ImageBackend | undefined> {
   const settings = await loadSettings();
   const api = settings.image.api;
-  const hasApi = Boolean(settings.image.baseUrl.trim() && settings.image.model.trim());
-  const remote: ImageBackend = /openrouter\.ai/i.test(settings.image.baseUrl) ? "openrouter" : "openai";
+  const hasApi = remoteImageReady(settings);
+  const remote: ImageBackend = remoteImageBackend(settings);
   if (api === "local") return "local";
-  if (api === "openai" || api === "openrouter") return hasApi ? api : undefined;
+  if (api === "openai" || api === "openrouter" || api === "icompify") return hasApi ? remote : undefined;
 
   const mode = await localImageMode(settings);
   if (mode === "direct") return "local";
@@ -143,6 +143,129 @@ export async function resolveImageBackend(
     return "local"; // 没配 API 时仍然尝试本地后端，让报错更具体
   }
   return hasApi ? remote : undefined;
+}
+
+type RemoteBackend = "icompify" | "openrouter" | "openai";
+
+/** image.apiKey 留空时复用 video.apiKey：图片与视频本来就在同一个 icompify 账号下。 */
+export function imageApiKey(settings: Settings) {
+  return settings.image.apiKey.trim() || settings.video.apiKey.trim();
+}
+
+/**
+ * 远程后端只由 api 或 baseUrl 推断，不单独存字段：
+ * 已经填过 OpenRouter 地址的老配置仍然按 openrouter 走。
+ */
+export function remoteImageBackend(settings: Settings): RemoteBackend {
+  const api = settings.image.api;
+  if (api === "icompify" || api === "openai" || api === "openrouter") return api;
+  if (/icompify\.com/i.test(settings.image.baseUrl)) return "icompify";
+  if (/openrouter\.ai/i.test(settings.image.baseUrl)) return "openrouter";
+  return "openai";
+}
+
+/** 远程图片后端是否算「配置好了」；icompify 是计费云，没 Key 就不算可用。 */
+export function remoteImageReady(settings: Settings) {
+  if (!settings.image.baseUrl.trim() || !settings.image.model.trim()) return false;
+  return remoteImageBackend(settings) === "icompify" ? Boolean(imageApiKey(settings)) : true;
+}
+
+function dataUriBytes(url: string) {
+  const match = /^data:([^;,]+)?(;base64)?,/i.exec(url);
+  if (!match) return undefined;
+  const payload = url.slice(match[0].length);
+  const bytes = match[2]
+    ? new Uint8Array(Buffer.from(payload, "base64"))
+    : new Uint8Array(Buffer.from(decodeURIComponent(payload), "binary"));
+  return { bytes, mimeType: match[1] || "image/png" };
+}
+
+function delay(signal: AbortSignal, ms: number) {
+  signal.throwIfAborted();
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason ?? new Error("已取消"));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/** 网关自己活着、上游 predictor 在重启时返回这三个码；这类失败请求不计费，重试是安全的。 */
+const retryableImageStatus = new Set([502, 503, 504]);
+const imageAttempts = 3;
+
+/**
+ * icompify 出图走的是 SGLang 的 OpenAI 兼容 chat 多模态接口：
+ * POST /v1/chat/completions，图片以 data URI 出现在 choices[0].message.content[] 里。
+ * 该网关没有 /v1/images/generations（实测 404），所以不能复用下面的 openai 分支。
+ * 上游 predictor 会不定期滚动重启并返回 502「dial tcp ... connection refused」，
+ * 因此这里对 502/503/504 与网络错误做 3 次退避重试（实测几秒后就恢复）。
+ * ACT: 只取第一张图；n>1 与条件图（输入 image_url）尚未验证，不要让调用方假设支持。
+ */
+async function generateViaIcompify(options: GenerateImageOptions, settings: Settings): Promise<ImageResult> {
+  const baseUrl = settings.image.baseUrl.trim().replace(/\/+$/, "").replace(/\/v1$/, "");
+  const model = settings.image.model.trim();
+  const apiKey = imageApiKey(settings);
+  if (!apiKey) throw new Error("尚未配置 icompify API Key：填 image.apiKey，或让 image.apiKey 留空复用 video.apiKey");
+  const size = resolveSize(options.size ?? settings.image.size, options.ratio ?? "16:9");
+  const timeout = AbortSignal.timeout(300_000);
+  const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
+  const started = Date.now();
+  let lastError = "未知错误";
+  for (let attempt = 1; attempt <= imageAttempts; attempt += 1) {
+    options.onProgress?.(20, attempt === 1 ? `请求 ${model || "icompify"} 出图（${size}）` : `重试 ${attempt}/${imageAttempts}：${model || "icompify"} 出图`);
+    let response: Response;
+    try {
+      response = await fetch(`${baseUrl}/v1/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({ model, messages: [{ role: "user", content: options.prompt }], size, n: 1 }),
+        signal,
+      });
+    } catch (error) {
+      lastError = (error as Error).message;
+      if (signal.aborted || attempt === imageAttempts) break;
+      await delay(signal, attempt * 2_000);
+      continue;
+    }
+    const text = await response.text();
+    if (response.ok) return readIcompifyImage(text, model, started);
+    lastError = `HTTP ${response.status}：${text.slice(0, 400)}`;
+    if (!retryableImageStatus.has(response.status) || attempt === imageAttempts) break;
+    options.onProgress?.(30, `icompify 图片服务暂不可用（HTTP ${response.status}），${attempt * 2} 秒后重试`);
+    await delay(signal, attempt * 2_000);
+  }
+  throw new Error(`icompify 图片请求失败（已尝试 ${imageAttempts} 次）：${lastError}`);
+}
+
+function readIcompifyImage(text: string, model: string, started: number): ImageResult {
+  let data: { model?: string; choices?: { message?: { content?: { type?: string; image_url?: { url?: string }; stage_durations?: { stage_0_gen_ms?: number } }[] | string } }[] };
+  try {
+    data = JSON.parse(text) as typeof data;
+  } catch {
+    throw new Error(`icompify 返回非 JSON：${text.slice(0, 300)}`);
+  }
+  const content = data.choices?.[0]?.message?.content;
+  const parts = Array.isArray(content) ? content : [];
+  const part = parts.find(item => item.image_url?.url);
+  const url = part?.image_url?.url ?? "";
+  if (!url) {
+    const plain = typeof content === "string" ? content.slice(0, 200) : JSON.stringify(content ?? "").slice(0, 200);
+    throw new Error(`icompify 未返回图片：${plain}`);
+  }
+  const genMs = Number(part?.stage_durations?.stage_0_gen_ms);
+  const seconds = Number.isFinite(genMs) && genMs > 0 ? Math.round(genMs) / 1000 : Math.round(Date.now() - started) / 1000;
+  const inline = dataUriBytes(url);
+  if (inline) {
+    if (!inline.bytes.byteLength) throw new Error("icompify 返回的图片数据为空");
+    return { bytes: inline.bytes, mimeType: inline.mimeType, model: data.model ?? model, backend: "icompify", seconds };
+  }
+  throw new Error(`icompify 返回的不是内联图片数据：${url.slice(0, 120)}`);
 }
 
 async function generateViaApi(options: GenerateImageOptions, settings: Settings, api: "openai" | "openrouter"): Promise<ImageResult> {
@@ -361,6 +484,11 @@ export async function generateImageWithModel(options: GenerateImageOptions): Pro
   if (!backend) return null;
   if (backend === "local") {
     const result = await generateViaLocal(options, settings);
+    options.onProgress?.(100, "图片已生成");
+    return result;
+  }
+  if (backend === "icompify") {
+    const result = await generateViaIcompify(options, settings);
     options.onProgress?.(100, "图片已生成");
     return result;
   }

@@ -1,9 +1,9 @@
 import { loadSettings } from "../config";
 import { sshRun, shellQuote } from "../util/ssh";
 import { exists } from "../util/fs";
-import { applyLocalImageEnv, localImageFiles, localImageMode, localImageReachable } from "./image";
+import { applyLocalImageEnv, imageApiKey, localImageFiles, localImageMode, localImageReachable, remoteImageBackend } from "./image";
 
-export type ImageBackendName = "openrouter" | "openai" | "local";
+export type ImageBackendName = "icompify" | "openrouter" | "openai" | "local";
 
 /** 依次尝试的环境变量名里取第一个非空值。 */
 function pickFromEnv(names: string[]) {
@@ -24,8 +24,7 @@ export async function checkImageBackend(signal?: AbortSignal) {
 
   const mode = await localImageMode(settings);
   const wantsLocal = api === "local" || (api === "auto" && Boolean(mode));
-  const wantsRemote = api !== "local" && Boolean(baseUrl && model);
-  const script = local.script.trim();
+  const wantsRemote = api !== "local" && Boolean(baseUrl && model);  const script = local.script.trim();
   const pythonBin = local.pythonBin.trim();
 
   if (wantsLocal) {
@@ -60,13 +59,14 @@ export async function checkImageBackend(signal?: AbortSignal) {
     }
   }
 
-  const apiKey = pickFromEnv(["IMAGEGEN_API_KEY", "IMAGE_GEN_API_KEY", "OPENROUTER_API_KEY"]) ?? settings.image.apiKey;
+  const apiKey = pickFromEnv(["IMAGEGEN_API_KEY", "IMAGE_GEN_API_KEY", "OPENROUTER_API_KEY", "ICOMPIFY_API_KEY"]) ?? imageApiKey(settings);
   if (wantsRemote) {
+    const backend = remoteImageBackend(settings);
     if (apiKey) {
-      lines.push(`远程图片模型：已配置（${model} @ ${baseUrl}）`);
+      lines.push(`远程图片模型：已配置（${backend} / ${model}）`);
       ok = true;
     } else {
-      lines.push(`远程图片模型：缺少 API Key（${model}）`);
+      lines.push(`远程图片模型：缺少 API Key（${backend} / ${model}）`);
     }
   } else if (api !== "local") {
     lines.push("远程图片模型：未配置");

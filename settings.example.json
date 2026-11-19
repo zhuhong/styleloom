@@ -29,10 +29,10 @@
     }
   },
   "image": {
-    "api": "auto",
-    "baseUrl": "https://openrouter.ai/api/v1",
+    "api": "icompify",
+    "baseUrl": "https://api.icompify.com",
     "apiKey": "",
-    "model": "qwen/qwen-image-2.1-turbo",
+    "model": "qwen-image-2.1",
     "size": "2K",
     "local": {
       "mode": "auto",

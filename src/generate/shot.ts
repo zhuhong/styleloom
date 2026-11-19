@@ -89,6 +89,10 @@ export async function generateShot(options: GenerateShotOptions): Promise<Genera
   const persist = options.persist ?? saveProject;
   shot.status = "generating";
   shot.error = undefined;
+  // 重新渲染必须清掉上一版的 videoId：否则面板会挂着一版旧的 video_id，
+  // resume/flush/reconcile 都可能把上一版已完成的任务当成本次在跑的那个。
+  shot.videoId = undefined;
+  shot.videoCreatedAt = undefined;
   if (options.skillIds) shot.skillIds = [...new Set(options.skillIds)];
   await persist(project);
 

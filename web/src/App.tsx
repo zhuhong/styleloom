@@ -213,6 +213,16 @@ export function App() {
     }, 400);
   }, [loadPacks, loadSkills, refreshDetail]);
 
+  const resyncJobs = useCallback((projectId: string) => {
+    // SSE 断了、或者某一拍 job 事件丢了，靠一次 REST 快照对齐；比等下次广播可靠。
+    api<{ jobs: RenderJob[] }>(`/api/projects/${encodeURIComponent(projectId)}/jobs`)
+      .then(data => {
+        if (projectRef.current?.id !== projectId) return;
+        setJobs(data.jobs || []);
+      })
+      .catch(() => {});
+  }, []);
+
   const connectJobs = useCallback((projectId: string | null, options: { keepJobs?: boolean } = {}) => {
     // 关闭所有旧连接，不只是 ref 里那个。
     // 否则 onerror 重连与切项目并发时会有两条流并存，旧流继续推别的项目的 job。
@@ -230,15 +240,7 @@ export function App() {
 
     source.onopen = () => {
       jobsRetryRef.current = 0;
-      if (options.keepJobs) {
-        api<{ jobs: RenderJob[] }>(`/api/projects/${encodeURIComponent(projectId)}/jobs`)
-          .then(data => {
-            if (projectRef.current?.id !== projectId) return;
-            if (jobsSourceRef.current !== source) return;
-            setJobs(data.jobs || []);
-          })
-          .catch(() => {});
-      }
+      if (options.keepJobs) resyncJobs(projectId);
     };
 
     source.onmessage = event => {
@@ -300,7 +302,23 @@ export function App() {
         }
       }, delay);
     };
-  }, [scheduleRefresh]);
+  }, [resyncJobs, scheduleRefresh]);
+
+  // 回到标签页 / 重新聚焦时对齐一次渲染队列：长时间挂着的页面即使 SSE 悄悄断了，
+  // 也不会永远停在旧的（可能是空的）列表上。
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      const id = projectRef.current?.id;
+      if (id) resyncJobs(id);
+    };
+    window.addEventListener("focus", onVisible);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [resyncJobs]);
 
   const clearPendingUploads = useCallback(() => {
     setPendingUploads(current => {
@@ -494,8 +512,10 @@ export function App() {
     } finally {
       setStreaming(false);
       scheduleRefresh();
+      // 一轮对话可能刚提交了渲染，这时候立即拉一次队列，不依赖 jobs SSE 那一拍。
+      resyncJobs(current.id);
     }
-  }, [handleEvent, pushBubble, pushError, scheduleRefresh]);
+  }, [handleEvent, pushBubble, pushError, resyncJobs, scheduleRefresh]);
 
   const uploadFiles = useCallback(async (fileList: FileList | File[]) => {
     const current = projectRef.current;

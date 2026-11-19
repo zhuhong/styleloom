@@ -417,10 +417,15 @@ async function runResume(job: RenderJob) {
  * videoId，这两次写盘之间存在窗口，重启时可能落在 status=promptReady 但
  * videoId 已存在的状态（真实踩到过）。只要拿到了 videoId 就说明已经计费，
  * 一律标 pending 让用户走 resume，不能当成没生成。
+ *
+ * 修正后一定要回填一条队列记录：pending 回填成「待恢复」，failed（重启时还没拿到
+ * videoId）回填成「已中断」。否则重启后面板是全空的，用户看到的现象就是「任务丢了」。
  */
 export async function reconcileStaleJobs() {
   const repaired: string[] = [];
   for (const summary of await listProjects()) {
+    /** 本次修正过的镜头，用来回填队列，避免和下面按盘上状态回填的那一轮重复建行。 */
+    const touched = new Set<string>();
     await mutateProject(summary.id, project => {
       let changed = false;
       for (const shot of project.plan) {
@@ -436,23 +441,27 @@ export async function reconcileStaleJobs() {
         }
         shot.updatedAt = new Date().toISOString();
         changed = true;
+        touched.add(shot.id);
         repaired.push(`${summary.id}/${shot.id}`);
       }
       return changed;
     });
-    // 把盘上的 pending 镜头回填成一条 job，否则重启后「渲染」面板是空的，
-    // 用户看不到可恢复的任务，只能去分镜页找。
+
     const project = await getProject(summary.id);
     for (const shot of project.plan) {
-      if (shot.status !== "pending" || !shot.videoId) continue;
+      // 只回填「未完成」的：pending 可恢复；failed 是重启打断的，留一行让用户知道发生过什么。
+      const resumable = shot.status === "pending" && Boolean(shot.videoId);
+      const interrupted = shot.status === "failed" && touched.has(shot.id);
+      if (!resumable && !interrupted) continue;
       if (activeJobForShot(summary.id, shot.id)) continue;
+      if ([...jobs.values()].some(job => job.projectId === summary.id && job.shotId === shot.id && job.status === shot.status)) continue;
       const job: RenderJob = {
         id: `job_${crypto.randomUUID().slice(0, 8)}`,
         projectId: summary.id,
         shotId: shot.id,
-        status: "pending",
+        status: resumable ? "pending" : "failed",
         percent: 0,
-        label: "已提交，等待恢复",
+        label: resumable ? "已提交，等待恢复" : "服务重启，渲染中断",
         startedAt: shot.videoCreatedAt || shot.updatedAt || now(),
         updatedAt: shot.updatedAt || now(),
         videoId: shot.videoId,

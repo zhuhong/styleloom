@@ -4,6 +4,7 @@ import {
   skillFileUrl,
   skillKindLabel,
   skillStatusLabel,
+  skillSurfaceLabel,
 } from "../../lib/utils";
 import { t } from "../../lib/i18n";
 import type { MediaRequest } from "../../lib/types";
@@ -18,6 +19,9 @@ type SkillCardProps = {
 
 export function SkillCard({ skill, onOpenMedia, onRate, rateBusy, savedRating }: SkillCardProps) {
   const [editing, setEditing] = useState(false);
+  // 只给「出图」相关技能加作用面标记：老技能默认是视频向，标出来反而噪音。
+  const surfaces = skill.appliesTo ?? ["video"];
+  const surfaceBadge = surfaces.includes("still") ? surfaces.map(skillSurfaceLabel).join(" + ") : "";
   useEffect(() => {
     if (savedRating) setEditing(false);
   }, [savedRating]);
@@ -26,6 +30,7 @@ export function SkillCard({ skill, onOpenMedia, onRate, rateBusy, savedRating }:
       <summary>
         <span class="skillName">{skill.name}</span>
         <span class="skillKind">{skillKindLabel(skill.kind)}</span>
+        {surfaceBadge ? <span class="skillKind">{surfaceBadge}</span> : null}
         <span class="skillConfidence">{Number(skill.confidence).toFixed(2)}</span>
       </summary>
       <p>{skill.summaryZh}</p>

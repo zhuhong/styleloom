@@ -173,10 +173,13 @@ VIDEOCOPY_DATA=/srv/styleloom-b bun start   # settings 里 port: 8788
 
 | `image.api` | 行为 | 费用 |
 | --- | --- | --- |
+| `icompify`（默认） | icompify 云端图片模型（`qwen-image-2.1` 默认 / `minimax-h3-image`） | 按张计费 |
 | `local` | 只用本地 GPU，不可用直接报错 | 免费 |
 | `auto` | 本地 GPU 可用就用，否则回退远程 | 视情况 |
-| `openrouter` / `openai` | 只用远程图片接口 | 按张计费 |
-| 留空（未配 `baseUrl`/`model`） | 回退为参考片关键帧 | 免费 |
+| `openrouter` / `openai` | 只用远程图片接口（自建网关 / OpenRouter） | 按张计费 |
+| 未配 Key（且无本地后端） | 回退为参考片关键帧 | 免费 |
+
+`icompify` 走的是 SGLang 的 OpenAI 兼容 chat 多模态接口（`POST /v1/chat/completions`，图片以 data URI 回在 `choices[0].message.content[]`）。该网关没有 `/v1/images/generations`，所以 `openai` 分支不能拿来填 icompify 地址。`image.apiKey` 留空会复用 `video.apiKey`。`size` 实测支持 `1024x1024` / `2048x1152` 这类显式 `宽x高`，`2K` 会按画幅换算后照原样生效。
 
 本地 GPU 的连法由 `image.local.mode` 决定：
 

@@ -211,12 +211,13 @@ export const toolSpecs: ToolSpec[] = [
   },
   {
     name: "search_skills",
-    description: "搜索技能库（本机累积 data/skills + 仓库公开 skills/）。规划分镜或写提示词前先搜索。公开技能默认 candidate/0.32，仅作知识参考；本机技能优先。",
+    description: "搜索技能库（本机累积 data/skills + 仓库公开 skills/）。规划分镜或写提示词前先搜索；生成定妆照/场景照前可用 kind=still 或 surface=still 找出图技能。公开技能默认 candidate/0.32，仅作知识参考；本机技能优先。",
     parameters: {
       type: "object",
       properties: {
-        query: { type: "string", description: "需求关键词，如 对话 紧张 推镜；留空返回高置信技能" },
-        kind: { type: "string", enum: ["camera", "lighting", "color", "composition", "rhythm", "prompt", "sound", "workflow", "avoid"] },
+        query: { type: "string", description: "需求关键词，如 对话 紧张 推镜 / 定妆照 全身；留空返回高置信技能" },
+        kind: { type: "string", enum: ["camera", "lighting", "color", "composition", "rhythm", "prompt", "sound", "workflow", "avoid", "still"] },
+        surface: { type: "string", enum: ["video", "still"], description: "按作用面过滤：video=视频提示词，still=定妆照/场景照" },
         limit: { type: "number", description: "返回条数，默认 8" },
         includeDeprecated: { type: "boolean", description: "是否包含已弃用技能" },
       },
@@ -244,7 +245,7 @@ export const toolSpecs: ToolSpec[] = [
       properties: {
         skillId: { type: "string" },
         rating: { type: "string", enum: ["good", "mixed", "bad"] },
-        shotId: { type: "string", description: "对应的分镜 id" },
+        shotId: { type: "string", description: "对应的分镜 id；出图技能写 still:<target>:<id>，例如 still:character:c1" },
         notes: { type: "string", description: "具体观察，例如 用力过猛/幅度刚好" },
       },
       required: ["skillId", "rating"],
@@ -353,13 +354,14 @@ export const toolSpecs: ToolSpec[] = [
   },
   {
     name: "generate_still",
-    description: "生成定妆照或场景照。本地 GPU（直连/SSH）免费，远程图片接口按张计费；都不可用时回退为参考片关键帧。",
+    description: "生成定妆照或场景照。会自动带上「出图技能」（kind=still，或 appliesTo 含 still）：默认按目标检索并注入想要的提示词片段，也可用 skillIds 指定。本地 GPU（直连/SSH）免费，远程图片接口（默认 icompify qwen-image-2.1）按张计费；都不可用时回退为参考片关键帧。",
     parameters: {
       type: "object",
       properties: {
         target: { type: "string", enum: ["character", "location"] },
         id: { type: "string", description: "风格圣经里的角色/场景 id" },
-        prompt: { type: "string", description: "可选，覆盖默认提示词" },
+        prompt: { type: "string", description: "可选，覆盖默认提示词（技能片段仍会追加）" },
+        skillIds: { type: "array", items: { type: "string" }, description: "可选，指定本次采用的出图技能 id；留空按定妆照/场景照自动检索" },
       },
       required: ["target", "id"],
     },
@@ -835,6 +837,7 @@ async function generateStillTool(ctx: ToolContext, args: Args) {
     target,
     id: reqString(args, "id"),
     promptOverride: optString(args, "prompt"),
+    skillIds: Array.isArray(args.skillIds) ? args.skillIds.map(value => String(value)).filter(Boolean) : undefined,
     signal: ctx.signal,
     onProgress: (percent, label) => ctx.emit({ type: "progress", scope: "generate_still", percent, label }),
   });
@@ -935,8 +938,10 @@ async function deleteProjectTool(ctx: ToolContext, args: Args) {
 
 async function searchSkillsTool(_ctx: ToolContext, args: Args) {
   const kind = optString(args, "kind") as SkillKind | undefined;
+  const surface = optString(args, "surface");
   const results = await searchSkills(optString(args, "query") ?? "", {
     kind,
+    surface: surface === "video" || surface === "still" ? surface : undefined,
     limit: optNumber(args, "limit"),
     includeDeprecated: args.includeDeprecated === true,
   });

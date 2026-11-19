@@ -1,6 +1,7 @@
 import type { Settings } from "../config";
 import type { Project, Skill } from "../types";
 import { listSkills } from "../store/skills";
+import { imageApiKey, remoteImageBackend, remoteImageReady } from "../providers/image";
 
 function learningSnapshot(project: Project) {
   const bible = project.styleBible;
@@ -30,13 +31,16 @@ function capabilitySnapshot(settings: Settings) {
   const sshReady = Boolean(localImage.host && localImage.script && localImage.pythonBin);
   const localReady = localImage.mode === "direct" ? pathsReady : localImage.mode === "ssh" ? sshReady : pathsReady || sshReady;
   const useLocal = localReady && (settings.image.api === "local" || settings.image.api === "auto");
-  const remoteImage = settings.image.baseUrl && settings.image.model;
+  const remoteImage = remoteImageReady(settings);
+  const remoteLabel = remoteImage ? `${remoteImageBackend(settings)} / ${settings.image.model}` : "";
   const localLabel = localImage.mode === "direct" ? "本机直连" : localImage.mode === "ssh" ? `SSH ${localImage.host}` : "auto 本机优先";
   const imageLine = useLocal
-    ? `本地 GPU 出图（${localLabel}，${settings.image.api === "auto" ? "失败回退远程" : "仅本地"}）${remoteImage ? `；远程备用：${settings.image.model}` : ""}`
+    ? `本地 GPU 出图（${localLabel}，${settings.image.api === "auto" ? "失败回退远程" : "仅本地"}）${remoteImage ? `；远程备用：${remoteLabel}` : ""}`
     : remoteImage
-      ? `已配置（${settings.image.model}）`
-      : "未配置（定妆照会回退为参考帧）";
+      ? `已配置（${remoteLabel}）`
+      : settings.image.api === "icompify" && !imageApiKey(settings)
+        ? "未配置（icompify 缺 API Key，定妆照会回退为参考帧）"
+        : "未配置（定妆照会回退为参考帧）";
   const videoLine = settings.video.provider === "local"
     ? `本地视频网关（${settings.video.local.baseUrl}；不支持尾帧/参考视频，ref2va 只用单张参考图）`
     : settings.video.apiKey
@@ -79,7 +83,7 @@ export async function buildSystemPrompt(project: Project, settings: Settings) {
 ## 生成流程（必须按顺序）
 1. update_brief 记录需求。
 2. 有参考片：study_reference_video → read_style_bible / read_learning_shots。
-3. 需要定妆照/场景照：generate_still。角色和场景的 id 必须来自风格圣经。
+3. 需要定妆照/场景照：generate_still。角色和场景的 id 必须来自风格圣经。出图前可用 search_skills（kind=still 或 surface=still）看有哪些出图方法；不传 skillIds 时 generate_still 会自己检索并注入适用技能，传了则只用在提示词里。角色照优先「全身完整 + 无缝背景」，场景照优先「空景 + 陈设层次」，这些都是技能库里可复用的规则。
 4. plan_shots 写分镜：每个镜头 1-15 秒整数，默认 5-8 秒；只有用户明确要短镜头时才低于 4 秒。action / camera / lighting / sound / dialogue 用英文（dialogue 保留用户原文）。
 5. build_shot_prompt 预览提示词（不花钱）。
 6. 把「镜头表 + 关键提示词 + 预计总时长」展示给用户，明确询问是否开始生成。只有用户明确同意后，才调用 generate_shot（confirmed=true）。逐镜头生成，一次一个。
@@ -97,7 +101,8 @@ export async function buildSystemPrompt(project: Project, settings: Settings) {
 - **仓库公开库（skills/）**：随仓库分发的只读知识层，无证据图与反馈。公开条目默认 candidate / 0.32，仅作方法参考；真正采用并在本机产生反馈后，才在本机累积置信度。
 - 规划分镜前，先用 search_skills 按需求搜索；命中后 read_skill 看完整规则。plan_shots 时用 skillIds 记录本次采用的技能；build_shot_prompt / generate_shot 会按 skillIds **自动注入** promptFragment 与 avoidWhen，你不必手工粘贴片段，但仍要把选型理由写进分镜的 camera/lighting/action。
 - 只用在语义匹配的镜头上；不要为了用技能而用。技能里的 avoidWhen 要遵守。
-- 生成后可请用户在右侧分镜/技能面板点「好/一般/差」；你也可以继续用 record_skill_outcome。公开条目不参与反馈写入（只读）。
+- 技能按作用面分「视频」（H3 分镜提示词）与「出图」（定妆照/场景照，kind=still 或 appliesTo 含 still）两类；灯光/色彩/构图/避坑这类跨模态技能两端都会用上。老技能没有 appliesTo 字段时按 kind 推断（运镜/节奏/声音算视频，出图技能算出图，其余两端通用）。
+- 生成后可请用户在右侧分镜/技能面板点「好/一般/差」；你也可以继续用 record_skill_outcome，出图技能把 shotId 写成 still:<target>:<id>（例如 still:character:c1）。公开条目不参与反馈写入（只读）。
 - 学习参考片会自动抽取技能；完成后向用户汇报新增/合并了哪些。库里近义重复时先 review_skill_duplicates，再经用户确认后用 merge_skills；规则不准用 update_skill 修正。
 - 技能是长期资产：不要删，改为 deprecated；有 3 个以上**独立项目**证据或 1 次好评会自动 active。想把本机优质方法回馈给公开库，用 export_skills 导出成公开条目。
 

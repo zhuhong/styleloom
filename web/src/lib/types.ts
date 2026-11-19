@@ -42,6 +42,8 @@ export type SkillSummary = {
   id: string;
   name: string;
   kind: string;
+  /** 作用面：video=H3 分镜提示词，still=定妆照/场景照。 */
+  appliesTo?: string[];
   status: string;
   confidence: number;
   summaryZh: string;

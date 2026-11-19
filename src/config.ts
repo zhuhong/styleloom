@@ -32,8 +32,10 @@ export type Settings = {
     };
   };
   image: {
-    api: "auto" | "openai" | "openrouter" | "local";
+    /** icompify = 云端 SGLang 出图（默认）；auto = 本地优先、不可用回退远程。 */
+    api: "auto" | "icompify" | "openai" | "openrouter" | "local";
     baseUrl: string;
+    /** 留空时复用 video.apiKey（同一平台同一个 Key）。 */
     apiKey: string;
     model: string;
     size: string;
@@ -111,10 +113,11 @@ export const defaultSettings: Settings = {
     },
   },
   image: {
-    api: "auto",
-    baseUrl: "",
+    api: "icompify",
+    baseUrl: "https://api.icompify.com",
     apiKey: "",
-    model: "",
+    // 2026-02 实测可用：qwen-image-2.1（快）、minimax-h3-image（更慢更占显存）
+    model: "qwen-image-2.1",
     size: "2K",
     local: {
       mode: "auto",
@@ -179,7 +182,12 @@ export function normalizeSettings(input: unknown): Settings {
   settings.image.local.steps = Math.min(50, Math.max(1, Number(settings.image.local.steps) || defaultSettings.image.local.steps));
   settings.image.local.timeoutMs = Math.max(30_000, Number(settings.image.local.timeoutMs) || defaultSettings.image.local.timeoutMs);
   if (!["auto", "cuda", "offload"].includes(settings.image.local.vram)) settings.image.local.vram = defaultSettings.image.local.vram;
-  if (!["auto", "openai", "openrouter", "local"].includes(settings.image.api)) settings.image.api = "auto";
+  if (!["auto", "icompify", "openai", "openrouter", "local"].includes(settings.image.api)) settings.image.api = defaultSettings.image.api;
+  // 空的 baseUrl 视为「默认 icompify」；模型名也只在 icompify 下补默认值，
+  // 免得给自建的 OpenAI 兼容端点塞一个它不认识的模型名。
+  settings.image.baseUrl = String(settings.image.baseUrl ?? "").trim() || defaultSettings.image.baseUrl;
+  const imageModel = String(settings.image.model ?? "").trim();
+  settings.image.model = imageModel || (/icompify\.com/i.test(settings.image.baseUrl) ? defaultSettings.image.model : "");
   settings.learning.sceneThreshold = Number(settings.learning.sceneThreshold) || defaultSettings.learning.sceneThreshold;
   settings.learning.maxShots = Math.min(200, Math.max(1, Number(settings.learning.maxShots) || defaultSettings.learning.maxShots));
   settings.learning.sampleCount = Math.min(3, Math.max(1, Number(settings.learning.sampleCount) || defaultSettings.learning.sampleCount));

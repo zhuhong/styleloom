@@ -71,7 +71,7 @@ Then fill in `data/settings.json` (or use the in-app **Settings** dialog):
 | `llm.baseUrl` / `apiKey` / `model` | Any OpenAI-compatible text endpoint that supports tool calling |
 | `llm.visionModel` | Model that accepts images; used for per-shot annotation |
 | `video.provider` / `video.apiKey` | `icompify` (default, billed) or `local` (self-hosted GPU gateway) |
-| `image.*` | Stills backend: `local` GPU, remote `openrouter` / `openai`, or empty to fall back to reference keyframes |
+| `image.*` | Stills backend: `icompify` cloud image models (`qwen-image-2.1` by default), `local` GPU, or `openrouter` / `openai`; no key falls back to reference keyframes |
 | `xhs.*` / `ffmpeg.*` / `learning.*` | Downloader, binary paths, slicing parameters |
 
 Everything else — data layout, persistent service, LAN access, reverse proxy, backup, troubleshooting, self-hosted GPU setup — is in the **[deployment guide](docs/deploy.md)** and **[local GPU backend](docs/local-gpu.md)**.
@@ -92,7 +92,7 @@ Everything else — data layout, persistent service, LAN access, reverse proxy, 
 | Slicing | `learn/slice.ts` | Scene-cut detection, keyframes, samples, reference clips, audio |
 | Annotation | `learn/annotate.ts` | One vision request per shot, strict JSON, resumable |
 | Distillation | `learn/distill.ts` | Compress annotations into the style bible + reusable pack |
-| Skills | `learn/skills.ts` | 3–8 candidate skills per study, merged by similarity, scored by evidence |
+| Skills | `learn/skills.ts`, `learn/stillSkills.ts` | 3–8 candidate skills per study (plus still-image skills derived from the bible), merged by similarity, scored by evidence |
 | Prompting | `generate/prompt.ts` | Picks T2VA / I2VA / FL2VA / L2VA / Ref2VA, then builds and validates the official H3 structure |
 | Rendering | `providers/video/`, `generate/jobs.ts` | icompify or a self-hosted gateway; runs as a detached background job |
 | Assembly | `generate/stitch.ts` | Normalize every clip, then hard-cut or crossfade into a final asset |

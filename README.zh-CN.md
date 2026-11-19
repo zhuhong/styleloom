@@ -71,7 +71,7 @@ bun start            # http://127.0.0.1:8787
 | `llm.baseUrl` / `apiKey` / `model` | 任意支持 tool calling 的 OpenAI 兼容文本接口 |
 | `llm.visionModel` | 支持图片输入的模型，逐镜拉片用 |
 | `video.provider` / `video.apiKey` | `icompify`（默认，计费）或 `local`（自建 GPU 网关） |
-| `image.*` | 定妆照后端：本地 GPU、远程 `openrouter` / `openai`，或留空回退参考帧 |
+| `image.*` | 定妆照后端：`icompify` 云端图片模型（默认 `qwen-image-2.1`）、本地 GPU，或 `openrouter` / `openai`；没 Key 时回退参考帧 |
 | `xhs.*` / `ffmpeg.*` / `learning.*` | 下载器、二进制路径、切片参数 |
 
 其余内容——数据目录、常驻服务、局域网访问、反向代理、备份、排错、自建 GPU——见 **[部署配置指南](docs/deploy.md)** 与 **[本地 GPU 后端](docs/local-gpu.md)**。
@@ -92,7 +92,7 @@ bun start            # http://127.0.0.1:8787
 | 切片 | `learn/slice.ts` | 场景切点检测、关键帧、采样、参考片段、音轨 |
 | 逐镜标注 | `learn/annotate.ts` | 每镜一次视觉请求，严格 JSON，可断点续跑 |
 | 归纳 | `learn/distill.ts` | 把标注压成风格圣经 + 可复用风格包 |
-| 技能抽取 | `learn/skills.ts` | 每次 3–8 条候选，按相似度合并，靠证据评分 |
+| 技能抽取 | `learn/skills.ts`、`learn/stillSkills.ts` | 每次 3–8 条候选（另从风格圣经派生定妆照/场景照的出图技能），按相似度合并，靠证据评分 |
 | 提示词 | `generate/prompt.ts` | 自动选 T2VA / I2VA / FL2VA / L2VA / Ref2VA，生成并校验官方结构 |
 | 生成 | `providers/video/`、`generate/jobs.ts` | icompify 或自建网关；后台任务，不阻塞对话 |
 | 拼接 | `generate/stitch.ts` | 统一转码后硬切或叠化成片 |

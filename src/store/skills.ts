@@ -1,9 +1,30 @@
 import { join } from "node:path";
 import { appRoot, dataDir } from "../config";
-import type { PublicSkill, Skill, SkillDraft, SkillEvidence, SkillKind, SkillOutcome, SkillStatus } from "../types";
+import type { PublicSkill, Skill, SkillDraft, SkillEvidence, SkillKind, SkillOutcome, SkillStatus, SkillSurface } from "../types";
 import { ensureDir, exists, listDirs, nowIso, readJsonIfExists, safeJoin, writeJson, writeText } from "../util/fs";
 
-export const skillKinds: SkillKind[] = ["camera", "lighting", "color", "composition", "rhythm", "prompt", "sound", "workflow", "avoid"];
+export const skillKinds: SkillKind[] = ["camera", "lighting", "color", "composition", "rhythm", "prompt", "sound", "workflow", "avoid", "still"];
+
+/**
+ * 按 kind 推断作用面。
+ * 运镜/节奏/声音只对视频有意义；构图、提示词类技能写的是参考片里的具体景别、
+ * 线条与 H3 提示词锚点，拼进静帧反而会把无关细节灌进去，所以默认也算视频侧；
+ * 灯光/色彩/流程/避坑是两端通用的。
+ */
+export function inferAppliesTo(kind: SkillKind): SkillSurface[] {
+  if (kind === "camera" || kind === "rhythm" || kind === "sound" || kind === "composition" || kind === "prompt") return ["video"];
+  if (kind === "still") return ["still"];
+  return ["video", "still"];
+}
+
+/**
+ * 技能的作用面。老技能（80 条存量）没有 appliesTo 字段，
+ * 这里按 kind 推断，避免「灯光/色彩/构图」这类跨模态技能在出图侧被误判为不可用。
+ */
+export function skillAppliesTo(skill: Pick<Skill, "kind" | "appliesTo">): SkillSurface[] {
+  const explicit = (skill.appliesTo ?? []).filter((item): item is SkillSurface => item === "video" || item === "still");
+  return explicit.length ? [...new Set(explicit)] : inferAppliesTo(skill.kind);
+}
 
 let cache: Skill[] | undefined;
 let publicCache: Skill[] | undefined;
@@ -50,6 +71,7 @@ function hydratePublic(item: PublicSkill): Skill {
     id: item.id,
     name: item.name,
     kind: item.kind,
+    appliesTo: item.appliesTo?.length ? item.appliesTo : inferAppliesTo(item.kind),
     status: "candidate",
     summaryZh: item.summaryZh,
     instruction: item.instruction,
@@ -217,9 +239,11 @@ export function normalizeDraft(raw: unknown): SkillDraft | undefined {
   const promptFragment = cleanText(value.promptFragment, 1400);
   if (!name || (!instruction && !promptFragment)) return undefined;
   const tags = cleanList(value.tags, 10, 32);
+  const appliesTo = cleanList(value.appliesTo, 2, 8).filter(item => item === "video" || item === "still") as SkillSurface[];
   return {
     name,
     kind,
+    appliesTo: appliesTo.length ? [...new Set(appliesTo)] : inferAppliesTo(kind),
     summaryZh,
     instruction,
     promptFragment,
@@ -242,6 +266,7 @@ export function createSkillFromDraft(draft: SkillDraft, evidence: SkillEvidence[
     id: newSkillId(draft),
     name: draft.name,
     kind: draft.kind,
+    appliesTo: draft.appliesTo?.length ? [...new Set(draft.appliesTo)] : inferAppliesTo(draft.kind),
     status: "candidate",
     summaryZh: draft.summaryZh,
     instruction: draft.instruction,
@@ -275,6 +300,12 @@ export function mergeDraftIntoSkill(skill: Skill, draft: SkillDraft, evidence: S
     if (next.length !== current.length) changed = true;
     return next;
   };
+  const incomingSurface = draft.appliesTo?.length ? draft.appliesTo : inferAppliesTo(draft.kind);
+  const nextSurface = [...new Set([...skillAppliesTo(skill), ...incomingSurface])] as SkillSurface[];
+  if (nextSurface.length !== skillAppliesTo(skill).length) {
+    skill.appliesTo = nextSurface;
+    changed = true;
+  }
   skill.tags = union(skill.tags, draft.tags, 10);
   skill.applicableWhen = union(skill.applicableWhen, draft.applicableWhen, 8);
   skill.avoidWhen = union(skill.avoidWhen, draft.avoidWhen, 6);
@@ -321,9 +352,13 @@ const kindHints: Record<string, SkillKind> = {
   提示词: "prompt",
   避坑: "avoid",
   流程: "workflow",
+  定妆照: "still",
+  场景照: "still",
+  参考帧: "still",
+  出图: "still",
 };
 
-export async function searchSkills(query: string, options: { kind?: SkillKind; limit?: number; includeDeprecated?: boolean } = {}) {
+export async function searchSkills(query: string, options: { kind?: SkillKind; surface?: SkillSurface; limit?: number; includeDeprecated?: boolean } = {}) {
   const local = await listSkills();
   const localIds = new Set(local.map(skill => skill.id));
   // 本机累积 + 仓库公开库；同 id 时本机覆盖公开（本机是个人资产，公开是知识参考）。
@@ -333,7 +368,9 @@ export async function searchSkills(query: string, options: { kind?: SkillKind; l
   const hintedKinds = new Set(Object.entries(kindHints).filter(([word]) => text.includes(word)).map(([, kind]) => kind));
   const limit = Math.min(50, Math.max(1, options.limit ?? 8));
   const scored = skills
-    .filter(skill => (!options.kind || skill.kind === options.kind) && (options.includeDeprecated || skill.status !== "deprecated"))
+    .filter(skill => (!options.kind || skill.kind === options.kind)
+      && (!options.surface || skillAppliesTo(skill).includes(options.surface))
+      && (options.includeDeprecated || skill.status !== "deprecated"))
     .map(skill => {
       let score = 0;
       let hits = 0;
@@ -462,6 +499,7 @@ export function skillToSummary(skill: Skill) {
     id: skill.id,
     name: skill.name,
     kind: skill.kind,
+    appliesTo: skillAppliesTo(skill),
     status: skill.status,
     confidence: skill.confidence,
     summaryZh: skill.summaryZh,
@@ -493,6 +531,7 @@ export function skillToMarkdown(skill: Skill) {
   lines.push(`id: ${skill.id}`);
   lines.push(`name: ${skill.name}`);
   lines.push(`kind: ${skill.kind}`);
+  lines.push(`appliesTo: ${skillAppliesTo(skill).join(", ")}`);
   lines.push(`status: ${skill.status}`);
   lines.push(`confidence: ${skill.confidence}`);
   lines.push(`version: ${skill.version}`);
@@ -515,7 +554,7 @@ export function skillToMarkdown(skill: Skill) {
   lines.push("## 执行规则");
   lines.push(skill.instruction || "-");
   lines.push("");
-  lines.push("## H3 prompt fragment");
+  lines.push(skillAppliesTo(skill).includes("still") && !skillAppliesTo(skill).includes("video") ? "## 出图 prompt fragment" : "## H3 prompt fragment");
   lines.push("```text");
   lines.push(skill.promptFragment || "N/A");
   lines.push("```");
@@ -574,7 +613,7 @@ export function publicSkillToMarkdown(item: PublicSkill) {
   lines.push("## 执行规则");
   lines.push(item.instruction || "-");
   lines.push("");
-  lines.push("## H3 prompt fragment");
+  lines.push("## H3 / 出图 prompt fragment");
   lines.push("```text");
   lines.push(item.promptFragment || "N/A");
   lines.push("```");
@@ -629,7 +668,8 @@ export async function loadSkillsByIds(ids: string[]) {
 }
 
 /** 把分镜选用的技能整理成可注入提示词的片段。 */
-export function skillPromptInjection(skills: Skill[]) {
+export function skillPromptInjection(skills: Skill[], options: { surface?: SkillSurface } = {}) {
+  if (options.surface) skills = skills.filter(skill => skillAppliesTo(skill).includes(options.surface!));
   const fragments = skills.map(skill => skill.promptFragment.trim()).filter(Boolean);
   const avoidWhen = [...new Set(skills.flatMap(skill => skill.avoidWhen.map(item => item.trim()).filter(Boolean)))];
   const notes = skills.map(skill => ({

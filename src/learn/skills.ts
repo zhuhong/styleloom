@@ -2,6 +2,7 @@ import { copyFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Project, Skill, SkillDraft, SkillEvidence, SliceManifest, StyleBible } from "../types";
 import { normalizeStyleBible } from "./bible";
+import { deriveStillSkills } from "./stillSkills";
 import { chatJson } from "../providers/llm";
 import { ensureDir, exists, nowIso } from "../util/fs";
 import { projectDir } from "../store/projects";
@@ -227,7 +228,10 @@ export async function extractSkillsFromStudy(options: {
     warning = `技能抽取模型调用失败，已使用规则版：${error instanceof Error ? error.message : String(error)}`;
   }
   if (!drafts.length) drafts = fallbackDrafts(bible, manifest);
-  onProgress(60, `合并 ${drafts.length} 条候选技能`);
+  // 出图技能不依赖模型抽取：直接从风格圣经派生，保证第一次学习后定妆照/场景照就有方法可用。
+  const stillDrafts = deriveStillSkills(bible);
+  drafts = [...drafts, ...stillDrafts];
+  onProgress(60, `合并 ${drafts.length} 条候选技能（视频 ${drafts.length - stillDrafts.length} / 出图 ${stillDrafts.length}）`);
   const created: Skill[] = [];
   const merged: Skill[] = [];
   for (let index = 0; index < drafts.length; index++) {

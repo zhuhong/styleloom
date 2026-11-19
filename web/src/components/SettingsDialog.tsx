@@ -64,7 +64,7 @@ const settingSections: { titleKey: string; hintKey?: string; htmlHint?: boolean;
     hintKey: "settings.imageHint",
     htmlHint: true,
     fields: [
-      { path: "image.api", labelKey: "settings.imageApi", placeholder: "auto / local / openrouter / openai" },
+      { path: "image.api", labelKey: "settings.imageApi", placeholder: "icompify / auto / local / openai / openrouter" },
       { path: "image.baseUrl", labelKey: "settings.baseUrl", placeholderKey: "settings.placeholderImageBaseUrl" },
       { path: "image.apiKey", labelKey: "settings.apiKey", type: "password" },
       { path: "image.model", labelKey: "settings.model", placeholderKey: "settings.placeholderImageModel" },

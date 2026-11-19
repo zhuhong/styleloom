@@ -282,7 +282,10 @@ export type AgentEvent =
   | { type: "done" };
 
 /** 全局技能：跨项目复用的可执行方法，不等于某个项目的风格圣经。 */
-export type SkillKind = "camera" | "lighting" | "color" | "composition" | "rhythm" | "prompt" | "sound" | "workflow" | "avoid";
+export type SkillKind = "camera" | "lighting" | "color" | "composition" | "rhythm" | "prompt" | "sound" | "workflow" | "avoid" | "still";
+
+/** 技能作用面：video = H3 分镜提示词，still = 定妆照 / 场景照的出图提示词。 */
+export type SkillSurface = "video" | "still";
 
 export type SkillStatus = "candidate" | "active" | "deprecated";
 
@@ -315,6 +318,8 @@ export type SkillRevision = {
 export type SkillDraft = {
   name: string;
   kind: SkillKind;
+  /** 留空时按 kind 推断：camera/rhythm/sound 只用于视频，still 只用于出图，其余两端通用。 */
+  appliesTo?: SkillSurface[];
   summaryZh: string;
   instruction: string;
   promptFragment: string;
@@ -339,6 +344,8 @@ export type Skill = {
   evidence: SkillEvidence[];
   outcomes: SkillOutcome[];
   stats: { used: number; reads: number; good: number; mixed: number; bad: number; lastUsedAt?: string };
+  /** 作用面；老技能没有这个字段时按 kind 推断（见 store/skills.ts 的 skillAppliesTo）。 */
+  appliesTo?: SkillSurface[];
   confidence: number;
   version: number;
   createdAt: string;
@@ -356,6 +363,7 @@ export type PublicSkill = {
   id: string;
   name: string;
   kind: SkillKind;
+  appliesTo?: SkillSurface[];
   summaryZh: string;
   instruction: string;
   promptFragment: string;
