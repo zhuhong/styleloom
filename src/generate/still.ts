@@ -20,8 +20,44 @@ export type StillResult = {
   references?: number;
   /** 本次注入到出图提示词里的技能（成功出图后才记 usage）。 */
   skillIds?: string[];
+  /** 实际使用的画幅。 */
+  ratio?: string;
   note?: string;
 };
+
+/** 常见画幅对应的英文构图短语；模型对这句比纯参数更敏感。 */
+const aspectPhrases: Record<string, string> = {
+  "1:1": "square 1:1 composition",
+  "9:16": "vertical 9:16 composition",
+  "16:9": "horizontal 16:9 composition",
+  "4:3": "horizontal 4:3 composition",
+  "3:4": "vertical 3:4 composition",
+  "21:9": "ultra-wide 21:9 composition",
+  "2:3": "vertical 2:3 composition",
+  "3:2": "horizontal 3:2 composition",
+};
+
+/** 提示词里现成的画幅描述（vertical 9:16 / 9:16 / square 1:1 …）。 */
+// 一并吃掉后面紧跟的 composition/frame 之类尾巴，保证同一个提示词反复处理也不会越拼越长。
+const aspectTokenPattern = /(?:^|[\s,;])(?:vertical|horizontal|landscape|portrait|square|widescreen|ultra-wide)?\s*\d{1,2}\s*:\s*\d{1,2}(?:\s+(?:composition|frame|format|aspect(?:\s+ratio)?))?(?=$|[\s,;.])/gi;
+
+/**
+ * 让提示词里的画幅和请求的画幅一致。
+ *
+ * 风格圣经是把参考片的 `Vertical 9:16 ...` 整段当 stylePrefix 拼进 stillPrompt 的，
+ * 定妆照里也就带上了 "vertical 9:16"。图像模型会照着文字构图，于是即使 size 传了
+ * 正方形也会画出竖屏——所以这里先剥掉旧的画幅描述，再按请求补一句。
+ */
+export function enforceAspect(prompt: string, ratio: string) {
+  const cleaned = prompt
+    .replace(aspectTokenPattern, " ")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,;.])/g, "$1")
+    .replace(/[\s,;]+$/, "")
+    .trim();
+  const phrase = aspectPhrases[ratio.trim()] ?? `${ratio.trim()} composition`;
+  return `${cleaned ? `${cleaned}${/[.!?]$/.test(cleaned) ? "" : "."}` : ""} ${phrase}`.trim();
+}
 
 /** 自动检索时只认「已经能打」的技能，避免早期 0 置信度的候选条目乱改提示词。 */
 function skillUsable(skill: Skill) {
@@ -120,6 +156,10 @@ export async function generateStill(options: {
   model?: string;
   /** 显式指定技能；留空则按「定妆照/场景照」自动检索出图技能（appliesTo 含 still）。 */
   skillIds?: string[];
+  /** 画幅，如 1:1 / 9:16 / 16:9；留空沿用项目 brief 的画幅。 */
+  ratio?: string;
+  /** 显式尺寸（宽x高 或 1K/2K）；留空用 image.size。 */
+  size?: string;
   signal?: AbortSignal;
   onProgress?: (percent: number, label: string) => void;
 }): Promise<StillResult> {
@@ -150,13 +190,15 @@ export async function generateStill(options: {
 
   // 出图技能：显式指定优先，否则按目标自动检索（只取 appliesTo=still 的）。
   const skills = await pickStillSkills(options.skillIds, target, sheet.name);
-  const composed = composeStillPrompt(prompt, skills, bible.style.stylePrefix ?? "");
+  // 画幅：显式请求优先；否则沿用项目 brief。提示词与 size 必须一致，否则模型会按文字画成竖屏。
+  const ratio = (options.ratio ?? "").trim() || project.brief.aspectRatio || "16:9";
+  const composed = enforceAspect(composeStillPrompt(prompt, skills, bible.style.stylePrefix ?? ""), ratio);
 
   const image = await generateImageWithModel({
     prompt: composed,
     model: options.model?.trim() || undefined,
-    size: settings.image.size,
-    ratio: project.brief.aspectRatio ?? "16:9",
+    size: options.size?.trim() || settings.image.size,
+    ratio,
     references,
     signal: options.signal,
     onProgress: options.onProgress,
@@ -179,6 +221,7 @@ export async function generateStill(options: {
       backend: image.backend,
       model: image.model,
       references: usedReferences,
+      ratio,
       skillIds: appliedSkillIds,
       note: image.backend === "local"
         ? `本地 GPU 生成${image.seconds ? `，${image.seconds.toFixed(1)}s` : ""}`

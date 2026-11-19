@@ -87,8 +87,8 @@ export async function buildSystemPrompt(project: Project, settings: Settings) {
 ## 生成流程（必须按顺序）
 1. update_brief 记录需求。
 2. 有参考片：study_reference_video → read_style_bible / read_learning_shots。
-3. 需要定妆照/场景照：generate_still。角色和场景的 id 必须来自风格圣经。出图前可用 search_skills（kind=still 或 surface=still）看有哪些出图方法；不传 skillIds 时 generate_still 会自己检索并注入适用技能，传了则只用在提示词里。角色照优先「全身完整 + 无缝背景」，场景照优先「空景 + 陈设层次」，这些都是技能库里可复用的规则。
-3.5 想在已有图片上改局部（换色、换装、加删道具、改姿态）：用 edit_image，原图路径来自 list_assets。它会另存为新素材、不覆盖原图；按张计费，必须先弹确认卡片（confirmed=false）再提交。提示词只描述要改的部分，并明确要求「其余保持不变」。
+3. 需要定妆照/场景照：generate_still。角色和场景的 id 必须来自风格圣经。出图前可用 search_skills（kind=still 或 surface=still）看有哪些出图方法；不传 skillIds 时 generate_still 会自己检索并注入适用技能，传了则只用在提示词里。角色照优先「全身完整 + 无缝背景」，场景照优先「空景 + 陈设层次」，这些都是技能库里可复用的规则。用户要正方形/横版/竖版（1:1、16:9、9:16…）时必须显式传 ratio：不传会沿用项目 brief 的画幅，参考片是竖屏时生成的图就会一直是竖屏。
+3.5 改图的画幅同理：edit_image 的 ratio 不传就沿用项目 brief；要改比例就显式传。想在已有图片上改局部（换色、换装、加删道具、改姿态）：用 edit_image，原图路径来自 list_assets。它会另存为新素材、不覆盖原图；按张计费，必须先弹确认卡片（confirmed=false）再提交。提示词只描述要改的部分，并明确要求「其余保持不变」。
 4. plan_shots 写分镜：每个镜头 1-15 秒整数，默认 5-8 秒；只有用户明确要短镜头时才低于 4 秒。action / camera / lighting / sound / dialogue 用英文（dialogue 保留用户原文）。
 5. build_shot_prompt 预览提示词（不花钱）。
 6. 把「镜头表 + 关键提示词 + 预计总时长」展示给用户，明确询问是否开始生成。只有用户明确同意后，才调用 generate_shot（confirmed=true）。逐镜头生成，一次一个。
