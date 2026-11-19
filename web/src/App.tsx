@@ -400,6 +400,7 @@ export function App() {
           shotId,
           title: String(event.title ?? shotId),
           durationSeconds: typeof event.durationSeconds === "number" ? event.durationSeconds : undefined,
+          force: event.force === true,
           status: "pending",
         }]);
       return;
@@ -623,15 +624,16 @@ export function App() {
    * 确认卡片：点「提交」时用一条隐藏的用户消息唤醒 Agent 真正调用 generate_shot(confirmed=true)。
    * 消息以 [确认卡片] 开头，历史回放时会被 server.ts:historyMessages 过滤掉。
    */
-  const handleConfirmSubmit = useCallback((item: { id: string; shotId: string; title: string; durationSeconds?: number }) => {
+  const handleConfirmSubmit = useCallback((item: { id: string; shotId: string; title: string; durationSeconds?: number; force?: boolean }) => {
     // 双击/并发保护：确认卡片提交是计费入口，必须先占位成功再发消息。
     if (!tryStartConfirmSubmit()) return;
     setChatItems(items => items.map(entry => (
       entry.kind === "confirm" && entry.id === item.id ? { ...entry, status: "submitted" } : entry
     )));
     const duration = item.durationSeconds ? `，durationSeconds=${item.durationSeconds}` : "";
+    const force = item.force ? "，force=true（用户已同意丢弃旧任务、二次计费）" : "";
     void sendMessage(
-      `[确认卡片] 用户已点击「提交」：shotId=${item.shotId}${duration}。请立刻用 generate_shot(confirmed=true) 提交，不要重新问确认。`,
+      `[确认卡片] 用户已点击「提交」：shotId=${item.shotId}${duration}${force}。请立刻用 generate_shot(confirmed=true) 提交，不要重新问确认。`,
       [],
     ).finally(() => {
       confirmSubmitRef.current = false;

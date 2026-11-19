@@ -1,6 +1,7 @@
 node_modules/
 web/dist/
 data/
+plans/
 *.log
 .DS_Store
 

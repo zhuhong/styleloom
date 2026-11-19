@@ -368,7 +368,7 @@ export const toolSpecs: ToolSpec[] = [
   },
   {
     name: "generate_shot",
-    description: "调用视频后端生成单个镜头视频：icompify 按次计费，本地 GPU 网关免费但占用显存。时长默认取分镜；低于 4 秒时默认按 4 秒生成后本地裁剪，只有 experimentalDuration=true 才直接请求短时长（用于验证 H3 档位）。video.provider=local 时不支持尾帧、参考视频，ref2va 只用第 1 张参考图。确认流程：先以 confirmed=false 调用一次，前端会弹出「提交/取消」确认卡片，用户点击后会自动发出确认消息，此时再传 confirmed=true。",
+    description: "调用视频后端生成单个镜头视频：icompify 按次计费，本地 GPU 网关免费但占用显存。时长默认取分镜；低于 4 秒时默认按 4 秒生成后本地裁剪，只有 experimentalDuration=true 才直接请求短时长（用于验证 H3 档位）。video.provider=local 时不支持尾帧、参考视频，ref2va 只用第 1 张参考图。确认流程（强制）：凡是要提交视频，都必须先以 confirmed=false 调用本工具来弹「提交/取消」确认卡片；confirmed=false 不产生费用、不算提交，禁止只用文字问用户要不要提交。用户点击「提交」后会自动发来确认消息，此时再传 confirmed=true。",
     parameters: {
       type: "object",
       properties: {
@@ -772,6 +772,8 @@ async function generateShotTool(ctx: ToolContext, args: Args) {
       promptOverride: optString(args, "promptOverride"),
       experimentalDuration: args.experimentalDuration === true,
       skillIds: args.skillIds === undefined ? pendingShot?.skillIds : stringArray(args, "skillIds"),
+      // force 必须在确认前就传：已有未完成任务时重提会二次计费，卡片要如实标注。
+      force: args.force === true,
       note: "尚未提交、未产生费用。前端会显示确认卡片；用户点击「提交」后会自动发来确认消息，届时用 confirmed=true 调用本工具。",
     };
   }

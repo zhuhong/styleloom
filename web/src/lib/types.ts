@@ -212,6 +212,8 @@ export type ChatItem =
       shotId: string;
       title: string;
       durationSeconds?: number;
+      /** 该镜头已有未完成任务，提交会二次计费；卡片要显式提示。 */
+      force?: boolean;
       status: "pending" | "submitted" | "declined";
     };
 

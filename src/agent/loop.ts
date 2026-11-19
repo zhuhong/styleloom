@@ -34,10 +34,10 @@ function sanitizeMessages(messages: LlmMessage[]) {
 }
 
 /** 工具返回「需要用户确认」时，转成前端可渲染的确认事件；目前只有 generate_shot 走这条路。 */
-function confirmationRequest(name: string, payload: unknown): AgentEvent | undefined {
+export function confirmationRequest(name: string, payload: unknown): AgentEvent | undefined {
   if (name !== "generate_shot") return undefined;
   if (!payload || typeof payload !== "object") return undefined;
-  const data = payload as { requiresConfirmation?: unknown; shotId?: unknown; title?: unknown; durationSeconds?: unknown };
+  const data = payload as { requiresConfirmation?: unknown; shotId?: unknown; title?: unknown; durationSeconds?: unknown; force?: unknown };
   if (data.requiresConfirmation !== true || typeof data.shotId !== "string") return undefined;
   return {
     type: "confirmation",
@@ -46,6 +46,7 @@ function confirmationRequest(name: string, payload: unknown): AgentEvent | undef
     shotId: data.shotId,
     title: typeof data.title === "string" ? data.title : data.shotId,
     durationSeconds: typeof data.durationSeconds === "number" ? data.durationSeconds : undefined,
+    force: data.force === true,
   };
 }
 

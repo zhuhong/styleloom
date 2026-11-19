@@ -26,7 +26,7 @@ type ChatPaneProps = {
   onRemoveUpload: (index: number) => void;
   onOpenMedia: (media: MediaRequest) => void;
   onFilesDropped: (files: FileList | File[]) => void;
-  onConfirmSubmit: (item: { id: string; shotId: string; title: string; durationSeconds?: number }) => void;
+  onConfirmSubmit: (item: { id: string; shotId: string; title: string; durationSeconds?: number; force?: boolean }) => void;
   onConfirmDecline: (item: { id: string; shotId: string }) => void;
 };
 
@@ -213,6 +213,7 @@ export function ChatPane({
                 <div class="confirmMeta">
                   {t("chat.confirmCost", { duration: item.durationSeconds ? `${item.durationSeconds}s` : t("chat.confirmDurationUnknown") })}
                 </div>
+                {item.force ? <div class="confirmWarn">{t("chat.confirmForce")}</div> : null}
                 {settled ? (
                   <div class="confirmSettled">
                     {item.status === "submitted" ? t("chat.confirmSubmitted") : t("chat.confirmDeclinedShort")}

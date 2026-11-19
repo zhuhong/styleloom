@@ -272,7 +272,7 @@ export type ProjectSummary = {
 
 export type AgentEvent =
   | { type: "message"; role: "user" | "assistant"; content: string; attachments?: ChatAttachment[] }
-  | { type: "confirmation"; id: string; action: "submit_shot"; shotId: string; title: string; durationSeconds?: number }
+  | { type: "confirmation"; id: string; action: "submit_shot"; shotId: string; title: string; durationSeconds?: number; force?: boolean }
   | { type: "tool_start"; id: string; name: string; args: unknown }
   | { type: "tool_end"; id: string; name: string; ok: boolean; preview: string; elapsedMs: number }
   | { type: "progress"; scope: string; percent: number; label: string }
