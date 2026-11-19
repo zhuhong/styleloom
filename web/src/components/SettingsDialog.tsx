@@ -68,6 +68,8 @@ const settingSections: { titleKey: string; hintKey?: string; htmlHint?: boolean;
       { path: "image.baseUrl", labelKey: "settings.baseUrl", placeholderKey: "settings.placeholderImageBaseUrl" },
       { path: "image.apiKey", labelKey: "settings.apiKey", type: "password" },
       { path: "image.model", labelKey: "settings.model", placeholderKey: "settings.placeholderImageModel" },
+      { path: "image.fallbackModel", labelKey: "settings.fallbackModel", placeholderKey: "settings.placeholderFallbackModel" },
+      { path: "image.editModel", labelKey: "settings.editModel", placeholderKey: "settings.placeholderEditModel" },
       { path: "image.size", labelKey: "settings.size", placeholderKey: "settings.placeholderImageSize" },
     ],
   },

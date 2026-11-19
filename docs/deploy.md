@@ -165,6 +165,12 @@ VIDEOCOPY_DATA=/srv/styleloom-b bun start   # settings 里 port: 8788
 
 ---
 
+### 上传素材
+
+- 输入框右侧 `＋` 选文件；也可以**直接从 Finder / 照片 / 浏览器拖进来**（整个窗口都是投放区，会出现虚线提示），截图工具里 `Cmd+V` 粘贴同样可以。
+- 一次最多 6 个；图片 20MB、视频 140MB 上限；不支持 SVG。
+- 拖进来的是**图片链接**而不是文件时（从别的浏览器标签拖图片常见），前端把链接发 `POST /api/projects/:id/uploads`（JSON `{ urls }`），由服务端下载后落盘，文件记录 `meta.sourceUrl`。服务端会拒绝本机/内网地址与 IPv6 字面量、最多跟随 3 次跳转、只接受 `image/*`（不含 SVG）。
+
 ## 4. 后端选型
 
 两条独立的轴：**图片**和**视频**可以分别选远程或本地 GPU。
@@ -173,13 +179,17 @@ VIDEOCOPY_DATA=/srv/styleloom-b bun start   # settings 里 port: 8788
 
 | `image.api` | 行为 | 费用 |
 | --- | --- | --- |
-| `icompify`（默认） | icompify 云端图片模型（`qwen-image-2.1` 默认 / `minimax-h3-image`） | 按张计费 |
+| `icompify`（默认） | icompify 云端图片模型：`image.model`（默认 `qwen-image-2.1`），失败自动退到 `image.fallbackModel`（默认 `minimax-h3-image`） | 按张计费 |
 | `local` | 只用本地 GPU，不可用直接报错 | 免费 |
 | `auto` | 本地 GPU 可用就用，否则回退远程 | 视情况 |
 | `openrouter` / `openai` | 只用远程图片接口（自建网关 / OpenRouter） | 按张计费 |
 | 未配 Key（且无本地后端） | 回退为参考片关键帧 | 免费 |
 
 `icompify` 走的是 SGLang 的 OpenAI 兼容 chat 多模态接口（`POST /v1/chat/completions`，图片以 data URI 回在 `choices[0].message.content[]`）。该网关没有 `/v1/images/generations`，所以 `openai` 分支不能拿来填 icompify 地址。`image.apiKey` 留空会复用 `video.apiKey`。`size` 实测支持 `1024x1024` / `2048x1152` 这类显式 `宽x高`，`2K` 会按画幅换算后照原样生效。
+
+**改图**走 `POST /v1/images/edits`（multipart：`model` / `prompt` / `image` / `size` / `n` / `response_format=b64_json`），回包与出图同形（`data[0].b64_json`，另带 `metrics`）。模型由 `image.editModel` 指定（默认 `qwen-image-2.1`，两个模型实测都能改图，`FLUX.2-klein-4B` 在示例文档里出现但当前 Key 没有权限）。本地 GPU 后端把原图当 `--ref` 条件图交给脚本；OpenRouter 没有编辑接口，会直接报错而不是静默降级成文生图。
+
+两个模型共用同一条通道，靠 `image.model` 切换；`generate_still` 也可用 `model` 参数单次覆盖（覆盖后不再换备用模型）。主备规则：主模型没拿到 200（502/503/504 先退避重试 3 次，再对 403/404/429/500 及网络错误换模型）才用 `image.fallbackModel`，200 之后的解析失败不换模型，避免二次计费；`fallbackModel` 留空即关闭。
 
 本地 GPU 的连法由 `image.local.mode` 决定：
 

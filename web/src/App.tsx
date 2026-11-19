@@ -28,6 +28,26 @@ import { Sidebar } from "./components/Sidebar";
 
 const panelScopedTools = new Set(["generate_shot", "resume_shot"]);
 
+/**
+ * 从拖拽载荷里提取图片地址。
+ * 从 Finder/照片拖是 files；从浏览器或图片应用拖常常只有 text/uri-list 或一段 <img src> 的 HTML。
+ * 是否真的是图片交给服务端按 Content-Type 判断，这里只挑出 http(s) 链接。
+ */
+function collectImageSources(dataTransfer: DataTransfer) {
+  const urls: string[] = [];
+  const add = (value: string | null | undefined) => {
+    const trimmed = (value ?? "").trim();
+    if (/^https?:\/\//i.test(trimmed)) urls.push(trimmed);
+  };
+  add(dataTransfer.getData("text/uri-list"));
+  add(dataTransfer.getData("text/plain"));
+  const html = dataTransfer.getData("text/html");
+  if (html) {
+    for (const match of html.matchAll(/<img[^>]+src=["']([^"']+)["']/gi)) add(match[1]);
+  }
+  return [...new Set(urls)].slice(0, 6);
+}
+
 function engineFlags(settings: AppSettings | null) {
   if (!settings) return [];
   return [
@@ -61,6 +81,8 @@ export function App() {
   const [skillFeedbackBusy, setSkillFeedbackBusy] = useState<string | null>(null);
   /** 本会话临时覆盖；持久态来自 project.plan[].skillFeedback / skills[].lastOutcome。 */
   const [skillFeedbackOverrides, setSkillFeedbackOverrides] = useState<Record<string, { rating: SkillRating; count?: number }>>({});
+  /** 拖拽到窗口上时显示全屏投放提示。 */
+  const [dragActive, setDragActive] = useState(false);
 
   const projectRef = useRef<Project | null>(null);
   const streamingRef = useRef(false);
@@ -76,6 +98,8 @@ export function App() {
   const jobsRetryRef = useRef(0);
   const jobsRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** dragenter/dragleave 会成对冒泡多次，用计数避免闪烁。 */
+  const dragDepthRef = useRef(0);
 
   useEffect(() => {
     projectRef.current = project;
@@ -574,7 +598,10 @@ export function App() {
     setUploading(value => value + entries.length);
 
     const form = new FormData();
-    for (const entry of entries) form.append("files", entry.file, entry.file.name);
+    for (const [index, entry] of entries.entries()) {
+      const file = files[index];
+      if (file) form.append("files", file, file.name);
+    }
     try {
       const response = await fetch(`/api/projects/${encodeURIComponent(current.id)}/uploads`, { method: "POST", body: form });
       const data = await response.json().catch(() => ({})) as { assets?: Project["assets"]; error?: string };
@@ -606,6 +633,145 @@ export function App() {
       setUploading(value => Math.max(0, value - entries.length));
     }
   }, [pushError, scheduleRefresh]);
+
+  /**
+   * 从 URL 上传（拖拽图片链接 / 从图片应用拖出来的 HTML）。
+   * 交给服务端下载：浏览器直连第三方图床会被 CORS 挡住，服务端还会做 SSRF 与大小校验。
+   */
+  const uploadUrls = useCallback(async (urls: string[]) => {
+    const current = projectRef.current;
+    if (!current) {
+      pushError(t("errors.needProjectForUpload"));
+      return;
+    }
+    const unique = [...new Set(urls.map(url => url.trim()).filter(Boolean))];
+    if (!unique.length) return;
+    let blocked = false;
+    setPendingUploads(currentUploads => {
+      if (currentUploads.length + unique.length > 6) blocked = true;
+      return currentUploads;
+    });
+    if (blocked) {
+      pushError(t("errors.tooManyUploads", { max: 6 }));
+      return;
+    }
+
+    const entries: PendingUpload[] = unique.map(url => ({
+      kind: "image",
+      previewUrl: "",
+      status: "uploading",
+      sourceUrl: url,
+    }));
+    setPendingUploads(currentUploads => [...currentUploads, ...entries]);
+    setUploading(value => value + entries.length);
+    try {
+      const response = await fetch(`/api/projects/${encodeURIComponent(current.id)}/uploads`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ urls: unique }),
+      });
+      const data = await response.json().catch(() => ({})) as { assets?: Project["assets"]; errors?: string[]; error?: string };
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      const assets = Array.isArray(data.assets) ? data.assets : [];
+      const failures = Array.isArray(data.errors) ? data.errors : [];
+      setPendingUploads(currentUploads => currentUploads.map(entry => {
+        const index = entries.indexOf(entry);
+        if (index < 0) return entry;
+        const asset = assets[index];
+        if (!asset) {
+          return { ...entry, status: "error", error: failures[0] || t("errors.noAssetReturned") };
+        }
+        return {
+          ...entry,
+          asset,
+          kind: mediaTypeForPath(asset.path) === "video" ? "video" : "image",
+          mimeType: typeof asset.meta?.mimeType === "string" ? asset.meta.mimeType : undefined,
+          size: typeof asset.meta?.size === "number" ? asset.meta.size : undefined,
+          status: "done",
+          previewUrl: fileUrl(current.id, asset.path),
+        };
+      }));
+      scheduleRefresh();
+    } catch (error) {
+      setPendingUploads(currentUploads => currentUploads.map(entry => (
+        entries.includes(entry) ? { ...entry, status: "error", error: (error as Error).message } : entry
+      )));
+      pushError(t("errors.uploadFailed", { message: (error as Error).message }));
+    } finally {
+      setUploading(value => Math.max(0, value - entries.length));
+    }
+  }, [pushError, scheduleRefresh]);
+
+  /**
+   * 统一的拖拽/粘贴入口：先看有没有真实文件，再看链接。
+   * 从 Finder / 照片拖出来是 files；从别的浏览器或图片应用拖出来常常只有
+   * text/uri-list 或一段 <img src="..."> 的 HTML，两个都要认。
+   */
+  const handleDropTransfer = useCallback((dataTransfer: DataTransfer | null) => {
+    if (!dataTransfer) return;
+    const files = [...(dataTransfer.files ?? [])].filter(isUploadableFile);
+    if (files.length) {
+      void uploadFiles(files);
+      return;
+    }
+    const urls = collectImageSources(dataTransfer);
+    if (urls.length) {
+      void uploadUrls(urls);
+      return;
+    }
+    pushError(t("errors.unsupportedDrop"));
+  }, [pushError, uploadFiles, uploadUrls]);
+
+  /**
+   * 全窗口拖拽投放：从其它应用拖图片进来就能用，不必对准输入框。
+   * 必须阻止 dragover 的默认行为，否则浏览器会直接用拖进来的图片替换当前页面。
+   */
+  useEffect(() => {
+    const onDragEnter = (event: DragEvent) => {
+      if (!event.dataTransfer) return;
+      dragDepthRef.current += 1;
+      if (!projectRef.current) return;
+      event.preventDefault();
+      setDragActive(true);
+    };
+    const onDragOver = (event: DragEvent) => {
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = projectRef.current ? "copy" : "none";
+    };
+    const onDragLeave = () => {
+      dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+      if (!dragDepthRef.current) setDragActive(false);
+    };
+    const onDrop = (event: DragEvent) => {
+      // 必须先读：preventDefault 之后 defaultPrevented 一定为 true，会把兜底逻辑吞掉。
+      const handledByChild = event.defaultPrevented;
+      event.preventDefault();
+      dragDepthRef.current = 0;
+      setDragActive(false);
+      // 输入框那层已经处理并 stopPropagation 过，这里只兜住「扔到页面其它地方」
+      if (handledByChild) return;
+      handleDropTransfer(event.dataTransfer);
+    };
+    const onPaste = (event: ClipboardEvent) => {
+      // 从截图工具/图片应用直接 Cmd+V 也当上传处理；纯文本粘贴不受影响
+      const files = [...(event.clipboardData?.files ?? [])].filter(isUploadableFile);
+      if (!files.length) return;
+      event.preventDefault();
+      void uploadFiles(files);
+    };
+    window.addEventListener("dragenter", onDragEnter);
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("dragleave", onDragLeave);
+    window.addEventListener("drop", onDrop);
+    document.addEventListener("paste", onPaste);
+    return () => {
+      window.removeEventListener("dragenter", onDragEnter);
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("dragleave", onDragLeave);
+      window.removeEventListener("drop", onDrop);
+      document.removeEventListener("paste", onPaste);
+    };
+  }, [handleDropTransfer, uploadFiles]);
 
   const handleSend = useCallback((message: string, attachments: ChatAttachment[]) => {
     setInput("");
@@ -811,6 +977,7 @@ export function App() {
           }}
           onOpenMedia={setMedia}
           onFilesDropped={files => void uploadFiles(files)}
+          onDropTransfer={handleDropTransfer}
           onConfirmSubmit={handleConfirmSubmit}
           onConfirmDecline={handleConfirmDecline}
         />
@@ -839,6 +1006,15 @@ export function App() {
           skillFeedbackNotes={skillFeedbackNotes}
         />
       </main>
+
+      {dragActive && project ? (
+        <div class="dropOverlay" aria-hidden="true">
+          <div class="dropCard">
+            <b>{t("drop.title")}</b>
+            <span>{t("drop.hint")}</span>
+          </div>
+        </div>
+      ) : null}
 
       <MediaDialog media={media} onClose={() => setMedia(null)} />
       <SettingsDialog

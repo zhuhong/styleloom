@@ -32,7 +32,11 @@ function capabilitySnapshot(settings: Settings) {
   const localReady = localImage.mode === "direct" ? pathsReady : localImage.mode === "ssh" ? sshReady : pathsReady || sshReady;
   const useLocal = localReady && (settings.image.api === "local" || settings.image.api === "auto");
   const remoteImage = remoteImageReady(settings);
-  const remoteLabel = remoteImage ? `${remoteImageBackend(settings)} / ${settings.image.model}` : "";
+  const fallbackModel = settings.image.fallbackModel?.trim();
+  const editModel = settings.image.editModel?.trim();
+  const remoteLabel = remoteImage
+    ? `${remoteImageBackend(settings)} / ${settings.image.model}${fallbackModel ? `（备用 ${fallbackModel}）` : ""}${editModel ? `；改图 ${editModel}` : ""}`
+    : "";
   const localLabel = localImage.mode === "direct" ? "本机直连" : localImage.mode === "ssh" ? `SSH ${localImage.host}` : "auto 本机优先";
   const imageLine = useLocal
     ? `本地 GPU 出图（${localLabel}，${settings.image.api === "auto" ? "失败回退远程" : "仅本地"}）${remoteImage ? `；远程备用：${remoteLabel}` : ""}`
@@ -84,6 +88,7 @@ export async function buildSystemPrompt(project: Project, settings: Settings) {
 1. update_brief 记录需求。
 2. 有参考片：study_reference_video → read_style_bible / read_learning_shots。
 3. 需要定妆照/场景照：generate_still。角色和场景的 id 必须来自风格圣经。出图前可用 search_skills（kind=still 或 surface=still）看有哪些出图方法；不传 skillIds 时 generate_still 会自己检索并注入适用技能，传了则只用在提示词里。角色照优先「全身完整 + 无缝背景」，场景照优先「空景 + 陈设层次」，这些都是技能库里可复用的规则。
+3.5 想在已有图片上改局部（换色、换装、加删道具、改姿态）：用 edit_image，原图路径来自 list_assets。它会另存为新素材、不覆盖原图；按张计费，必须先弹确认卡片（confirmed=false）再提交。提示词只描述要改的部分，并明确要求「其余保持不变」。
 4. plan_shots 写分镜：每个镜头 1-15 秒整数，默认 5-8 秒；只有用户明确要短镜头时才低于 4 秒。action / camera / lighting / sound / dialogue 用英文（dialogue 保留用户原文）。
 5. build_shot_prompt 预览提示词（不花钱）。
 6. 把「镜头表 + 关键提示词 + 预计总时长」展示给用户，明确询问是否开始生成。只有用户明确同意后，才调用 generate_shot（confirmed=true）。逐镜头生成，一次一个。
@@ -107,6 +112,15 @@ export async function buildSystemPrompt(project: Project, settings: Settings) {
 - 技能是长期资产：不要删，改为 deprecated；有 3 个以上**独立项目**证据或 1 次好评会自动 active。想把本机优质方法回馈给公开库，用 export_skills 导出成公开条目。
 
 ${skillIndex}
+
+## 读图（describe_image）
+- **你能看图，但必须通过工具看**。用户上传图片后，凡是涉及画面内容的问题（学构图、按图写提示词、看图判断风格/光线），第一件事就是调 \`describe_image\`。
+- 禁止反问用户「图里是什么」「请描述一下构图」，也不要凭文件名臆测画面。用户没耐心替你读图。
+- 调用方式：\`describe_image({path:"assets/uploads/xxx.png"})\`；用户刚上传且只有一张时可直接 \`describe_image({})\`，自动取最近一张图片素材。一次最多 3 张。
+- 返回里 \`images[].t2vPrompt\` 是可直接进 t2v 提示词的英文画面段；\`composition\`/\`shotSize\`/\`cameraAngle\`/\`lighting\` 是构图结论，写分镜时照用，不要改写。
+- 同一张图同样 \`focus\` 重复调用走本地缓存（\`learning/images/\`），不重复计费；图片变了会自动重算。
+- 要让用户看到你读的是哪张图，可用返回的 \`images[].markdown\` 内联。
+- 视觉模型未配置时直接告诉用户在设置里填 \`visionModel\`，不要假装看过图。
 
 ## 用户上传素材
 - 聊天框上传的图片/视频保存在 \`assets/uploads/\`，消息里会列出项目内相对路径。
@@ -148,7 +162,7 @@ ${skillIndex}
 - 画幅默认 16:9，除非用户指定。H3 输出固定 768P。
 - 不要在回复里编造已经生成的文件或平台结果；一切以工具返回为准。
 - 生成失败时先解释原因和 video_id，不要自动连续重试。费用敏感操作必须先确认（走「提交视频前的确认」的确认卡片，不要用文字问）。
-- 视觉模型未配置时，明确告诉用户在设置里填写 visionModel，不要假装完成拉片。
+- 视觉模型未配置时，明确告诉用户在设置里填写 visionModel，不要假装完成拉片或读图。
 - 不要把逐镜头分析全文贴给用户，用中文归纳。
 
 ## 当前项目

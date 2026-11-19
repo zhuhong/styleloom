@@ -1,9 +1,10 @@
-import { rm } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { dataDir, loadSettings, type Settings } from "../config";
 import { ensureDir, exists } from "../util/fs";
 import { runProcess } from "../util/ffmpeg";
 import { fetchRemoteFile, scpToRemote, shellQuote, sshReachable, sshRun, withRemoteWorkdir } from "../util/ssh";
+import { mimeFromPath } from "./llm";
 
 export type ImageBackend = "icompify" | "openrouter" | "openai" | "local";
 
@@ -23,6 +24,8 @@ export type ImageProgress = (percent: number, label: string) => void;
 export type GenerateImageOptions = {
   prompt: string;
   size?: string;
+  /** 显式指定模型（覆盖 settings.image.model，且不再自动换备用模型）。 */
+  model?: string;
   ratio?: string;
   /** 参考图（绝对路径）；只有本地后端真正支持多张条件图 */
   references?: string[];
@@ -195,52 +198,141 @@ function delay(signal: AbortSignal, ms: number) {
   });
 }
 
-/** 网关自己活着、上游 predictor 在重启时返回这三个码；这类失败请求不计费，重试是安全的。 */
+/** 带 HTTP 状态的出图错误：主备模型要靠它判断是「换模型」还是「重试」或「直接放弃」。 */
+class ImageRequestError extends Error {
+  status: number | undefined;
+  constructor(message: string, status?: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+/** 网关自己活着、上游 predictor 在重启时返回这几个码；这类失败请求不计费，重试是安全的。 */
 const retryableImageStatus = new Set([502, 503, 504]);
+/** 换备用模型也安全的失败：上游不可用 / 模型不可用或没权限 / 限流。 */
+const modelFallbackStatuses = new Set([403, 404, 429, 500, 502, 503, 504]);
 const imageAttempts = 3;
 
 /**
  * icompify 出图走的是 SGLang 的 OpenAI 兼容 chat 多模态接口：
  * POST /v1/chat/completions，图片以 data URI 出现在 choices[0].message.content[] 里。
  * 该网关没有 /v1/images/generations（实测 404），所以不能复用下面的 openai 分支。
- * 上游 predictor 会不定期滚动重启并返回 502「dial tcp ... connection refused」，
- * 因此这里对 502/503/504 与网络错误做 3 次退避重试（实测几秒后就恢复）。
  * ACT: 只取第一张图；n>1 与条件图（输入 image_url）尚未验证，不要让调用方假设支持。
+ */
+async function requestIcompifyImage(input: {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  prompt: string;
+  size: string;
+  signal: AbortSignal;
+  started: number;
+}): Promise<ImageResult> {
+  let response: Response;
+  try {
+    response = await fetch(`${input.baseUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: `Bearer ${input.apiKey}` },
+      body: JSON.stringify({ model: input.model, messages: [{ role: "user", content: input.prompt }], size: input.size, n: 1 }),
+      signal: input.signal,
+    });
+  } catch (error) {
+    throw new ImageRequestError((error as Error).message);
+  }
+  const text = await response.text();
+  if (!response.ok) throw new ImageRequestError(`HTTP ${response.status}：${text.slice(0, 400)}`, response.status);
+  return readIcompifyImage(text, input.model, input.started);
+}
+
+/**
+ * 单个模型的出图尝试：502/503/504 与网络错误退避重试 3 次。
+ * 上游 predictor 滚动重启时会短暂 502「dial tcp ... connection refused」，实测几秒后就恢复。
+ */
+async function icompifyWithModel(model: string, input: {
+  baseUrl: string;
+  apiKey: string;
+  prompt: string;
+  size: string;
+  signal: AbortSignal;
+  started: number;
+  onProgress?: ImageProgress;
+  attemptLabel: (attempt: number, total: number) => string;
+}): Promise<ImageResult> {
+  let lastError: unknown = new Error("未知错误");
+  for (let attempt = 1; attempt <= imageAttempts; attempt += 1) {
+    input.onProgress?.(20, input.attemptLabel(attempt, imageAttempts));
+    try {
+      return await requestIcompifyImage({
+        baseUrl: input.baseUrl,
+        apiKey: input.apiKey,
+        model,
+        prompt: input.prompt,
+        size: input.size,
+        signal: input.signal,
+        started: input.started,
+      });
+    } catch (error) {
+      lastError = error;
+      if (input.signal.aborted) throw error;
+      const status = error instanceof ImageRequestError ? error.status : undefined;
+      const retryable = status === undefined || retryableImageStatus.has(status);
+      if (!retryable || attempt === imageAttempts) throw error;
+      input.onProgress?.(30, `icompify 图片服务暂不可用（HTTP ${status}），${attempt * 2} 秒后重试`);
+      await delay(input.signal, attempt * 2_000);
+    }
+  }
+  throw lastError;
+}
+
+/**
+ * icompify 出图入口：先跑主模型，失败且换模型也安全时再跑 `image.fallbackModel`。
+ *
+ * 两个模型（qwen-image-2.1 / minimax-h3-image）在同一条通道上，靠 model 字符串切换：
+ * - 调用方显式传了 `options.model` 就只用它，不自动换（用户意图优先）。
+ * - 否则用 `image.model`，失败后退到 `image.fallbackModel`（默认 minimax-h3-image）。
+ * - 只在「没拿到 200」时换模型：200 之后的解析失败不再换，避免二次计费。
  */
 async function generateViaIcompify(options: GenerateImageOptions, settings: Settings): Promise<ImageResult> {
   const baseUrl = settings.image.baseUrl.trim().replace(/\/+$/, "").replace(/\/v1$/, "");
-  const model = settings.image.model.trim();
   const apiKey = imageApiKey(settings);
   if (!apiKey) throw new Error("尚未配置 icompify API Key：填 image.apiKey，或让 image.apiKey 留空复用 video.apiKey");
+  const requested = options.model?.trim() ?? "";
+  const primary = requested || settings.image.model.trim();
+  if (!primary) throw new Error("尚未配置 icompify 图片模型：填 image.model");
+  const fallback = requested ? "" : settings.image.fallbackModel?.trim() ?? "";
+  const models = fallback && fallback !== primary ? [primary, fallback] : [primary];
   const size = resolveSize(options.size ?? settings.image.size, options.ratio ?? "16:9");
   const timeout = AbortSignal.timeout(300_000);
   const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
   const started = Date.now();
-  let lastError = "未知错误";
-  for (let attempt = 1; attempt <= imageAttempts; attempt += 1) {
-    options.onProgress?.(20, attempt === 1 ? `请求 ${model || "icompify"} 出图（${size}）` : `重试 ${attempt}/${imageAttempts}：${model || "icompify"} 出图`);
-    let response: Response;
+  const failures: string[] = [];
+
+  for (const [index, model] of models.entries()) {
     try {
-      response = await fetch(`${baseUrl}/v1/chat/completions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify({ model, messages: [{ role: "user", content: options.prompt }], size, n: 1 }),
+      return await icompifyWithModel(model, {
+        baseUrl,
+        apiKey,
+        prompt: options.prompt,
+        size,
         signal,
+        started,
+        onProgress: options.onProgress,
+        attemptLabel: (attempt, total) => {
+          const prefix = index === 0 ? "" : "备用模型 ";
+          if (attempt === 1) return `${prefix}请求 ${model} 出图（${size}）`;
+          return `${prefix}重试 ${attempt}/${total}：${model} 出图`;
+        },
       });
     } catch (error) {
-      lastError = (error as Error).message;
-      if (signal.aborted || attempt === imageAttempts) break;
-      await delay(signal, attempt * 2_000);
-      continue;
+      failures.push(`${model}: ${(error as Error).message}`);
+      if (signal.aborted) throw error;
+      const status = error instanceof ImageRequestError ? error.status : undefined;
+      const next = models[index + 1];
+      if (!next || (status !== undefined && !modelFallbackStatuses.has(status))) break;
+      options.onProgress?.(35, `${model} 不可用，改用备用模型 ${next}`);
     }
-    const text = await response.text();
-    if (response.ok) return readIcompifyImage(text, model, started);
-    lastError = `HTTP ${response.status}：${text.slice(0, 400)}`;
-    if (!retryableImageStatus.has(response.status) || attempt === imageAttempts) break;
-    options.onProgress?.(30, `icompify 图片服务暂不可用（HTTP ${response.status}），${attempt * 2} 秒后重试`);
-    await delay(signal, attempt * 2_000);
   }
-  throw new Error(`icompify 图片请求失败（已尝试 ${imageAttempts} 次）：${lastError}`);
+  throw new Error(`icompify 图片请求失败（已尝试 ${models.length} 个模型）：${failures.join("；")}`);
 }
 
 function readIcompifyImage(text: string, model: string, started: number): ImageResult {
@@ -266,6 +358,192 @@ function readIcompifyImage(text: string, model: string, started: number): ImageR
     return { bytes: inline.bytes, mimeType: inline.mimeType, model: data.model ?? model, backend: "icompify", seconds };
   }
   throw new Error(`icompify 返回的不是内联图片数据：${url.slice(0, 120)}`);
+}
+
+export type EditImageOptions = {
+  prompt: string;
+  /** 原图绝对路径（项目内文件已由调用方 safeJoin 校验） */
+  source: string;
+  size?: string;
+  ratio?: string;
+  /** 显式指定模型；留空用 image.editModel，失败退到 image.fallbackModel */
+  model?: string;
+  signal?: AbortSignal;
+  onProgress?: ImageProgress;
+};
+
+/** /images/edits 的响应与 /images/generations 同形：data[0] 里是 b64_json 或 url。 */
+async function readImagesApiResponse(text: string, model: string, started: number, backend: ImageBackend): Promise<ImageResult> {
+  let data: { data?: { b64_json?: string; url?: string; media_type?: string }[]; metrics?: { stage_durations?: { stage_0_gen_ms?: number } } };
+  try {
+    data = JSON.parse(text) as typeof data;
+  } catch {
+    throw new Error(`${backend} 返回非 JSON：${text.slice(0, 300)}`);
+  }
+  const item = data.data?.[0];
+  const genMs = Number(data.metrics?.stage_durations?.stage_0_gen_ms);
+  const seconds = Number.isFinite(genMs) && genMs > 0 ? Math.round(genMs) / 1000 : Math.round(Date.now() - started) / 1000;
+  if (item?.b64_json) {
+    const bytes = new Uint8Array(Buffer.from(item.b64_json, "base64"));
+    if (!bytes.byteLength) throw new Error(`${backend} 返回的图片数据为空`);
+    return { bytes, mimeType: item.media_type ?? "image/png", model, backend, seconds };
+  }
+  if (item?.url) {
+    const response = await fetch(item.url);
+    if (!response.ok) throw new Error(`下载生成图片失败：HTTP ${response.status}`);
+    const mimeType = item.media_type ?? (response.headers.get("content-type") ?? "image/png").split(";")[0];
+    return { bytes: new Uint8Array(await response.arrayBuffer()), mimeType, model, backend, seconds };
+  }
+  throw new Error(`${backend} 未返回图片数据：${text.slice(0, 200)}`);
+}
+
+/**
+ * 单次改图请求：multipart 表单（model / prompt / image / size / n / response_format）。
+ * icompify 走 /v1/images/edits；OpenAI 兼容网关走 /images/edits。两者表单字段一致。
+ */
+async function requestEdit(input: {
+  endpoint: string;
+  apiKey: string;
+  model: string;
+  prompt: string;
+  size: string;
+  source: string;
+  signal: AbortSignal;
+  started: number;
+  backend: ImageBackend;
+}): Promise<ImageResult> {
+  const bytes = await readFile(input.source);
+  if (!bytes.byteLength) throw new ImageRequestError(`原图为空：${input.source}`);
+  const form = new FormData();
+  form.set("model", input.model);
+  form.set("prompt", input.prompt);
+  form.set("image", new File([bytes], input.source.split("/").pop() || "source.png", { type: mimeFromPath(input.source) }));
+  form.set("size", input.size);
+  form.set("n", "1");
+  form.set("response_format", "b64_json");
+  let response: Response;
+  try {
+    response = await fetch(input.endpoint, {
+      method: "POST",
+      headers: { Accept: "application/json", Authorization: `Bearer ${input.apiKey}` },
+      body: form,
+      signal: input.signal,
+    });
+  } catch (error) {
+    throw new ImageRequestError((error as Error).message);
+  }
+  const text = await response.text();
+  if (!response.ok) throw new ImageRequestError(`HTTP ${response.status}：${text.slice(0, 400)}`, response.status);
+  return readImagesApiResponse(text, input.model, input.started, input.backend);
+}
+
+/** 改图也有主备模型与 502 退避重试，口径与文生图一致。 */
+async function editWithModel(model: string, input: {
+  endpoint: string;
+  apiKey: string;
+  prompt: string;
+  size: string;
+  source: string;
+  signal: AbortSignal;
+  started: number;
+  backend: ImageBackend;
+  onProgress?: ImageProgress;
+  attemptLabel: (attempt: number, total: number) => string;
+}): Promise<ImageResult> {
+  let lastError: unknown = new Error("未知错误");
+  for (let attempt = 1; attempt <= imageAttempts; attempt += 1) {
+    input.onProgress?.(20, input.attemptLabel(attempt, imageAttempts));
+    try {
+      return await requestEdit({ ...input, model });
+    } catch (error) {
+      lastError = error;
+      if (input.signal.aborted) throw error;
+      const status = error instanceof ImageRequestError ? error.status : undefined;
+      const retryable = status === undefined || retryableImageStatus.has(status);
+      if (!retryable || attempt === imageAttempts) throw error;
+      input.onProgress?.(30, `icompify 改图服务暂不可用（HTTP ${status}），${attempt * 2} 秒后重试`);
+      await delay(input.signal, attempt * 2_000);
+    }
+  }
+  throw lastError;
+}
+
+/**
+ * 改图入口：拿项目内已有的一张图当原图，按 prompt 局部修改。
+ *
+ * 后端差异：
+ * - icompify / openai：走 /v1/images/edits（multipart），支持主备模型。
+ * - local：把原图作为 `--ref` 条件图交给脚本（本地脚本本来就支持 vision 条件通道）。
+ * - openrouter：没有编辑接口，直接报错，不静默降级成文生图。
+ */
+export async function editImageWithModel(options: EditImageOptions): Promise<ImageResult> {
+  const settings = await loadSettings();
+  applyLocalImageEnv(settings);
+  if (!(await exists(options.source))) throw new Error(`原图不存在：${options.source}`);
+  const backend = await resolveImageBackend({ signal: options.signal, onProgress: options.onProgress });
+  if (!backend) throw new Error("没有可用的图片后端：既没配本地出图，也没配远程图片模型");
+  const size = resolveSize(options.size ?? settings.image.size, options.ratio ?? "1:1");
+  const rating = options.ratio ?? "1:1";
+
+  if (backend === "local") {
+    options.onProgress?.(20, "本机改图（原图作为条件图）");
+    const result = await generateViaLocal({
+      prompt: options.prompt,
+      size: options.size,
+      ratio: rating,
+      references: [options.source],
+      signal: options.signal,
+      onProgress: options.onProgress,
+    }, settings);
+    options.onProgress?.(100, "图片已修改");
+    return result;
+  }
+  if (backend === "openrouter") throw new Error("OpenRouter 没有 /images/edits 接口：改图请用 icompify 或本地 GPU 后端");
+
+  const baseUrl = settings.image.baseUrl.trim().replace(/\/+$/, "");
+  const apiKey = imageApiKey(settings);
+  if (!apiKey && backend === "icompify") throw new Error("尚未配置 icompify API Key：填 image.apiKey，或让 image.apiKey 留空复用 video.apiKey");
+  const requested = options.model?.trim() ?? "";
+  const settingsPrimary = settings.image.editModel?.trim() || settings.image.model.trim();
+  const primary = requested || settingsPrimary;
+  if (!primary) throw new Error("尚未配置改图模型：填 image.editModel 或 image.model");
+  const fallback = requested ? "" : settings.image.fallbackModel?.trim() ?? "";
+  const models = fallback && fallback !== primary ? [primary, fallback] : [primary];
+  const endpoint = backend === "icompify" ? `${baseUrl}/v1/images/edits` : `${baseUrl}/images/edits`;
+  const timeout = AbortSignal.timeout(300_000);
+  const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
+  const started = Date.now();
+  const failures: string[] = [];
+
+  for (const [index, model] of models.entries()) {
+    try {
+      const result = await editWithModel(model, {
+        endpoint,
+        apiKey,
+        prompt: options.prompt,
+        size,
+        source: options.source,
+        signal,
+        started,
+        backend,
+        onProgress: options.onProgress,
+        attemptLabel: (attempt, total) => {
+          const prefix = index === 0 ? "" : "备用模型 ";
+          return attempt === 1 ? `${prefix}请求 ${model} 改图（${size}）` : `${prefix}重试 ${attempt}/${total}：${model} 改图`;
+        },
+      });
+      options.onProgress?.(100, "图片已修改");
+      return result;
+    } catch (error) {
+      failures.push(`${model}: ${(error as Error).message}`);
+      if (signal.aborted) throw error;
+      const status = error instanceof ImageRequestError ? error.status : undefined;
+      const next = models[index + 1];
+      if (!next || (status !== undefined && !modelFallbackStatuses.has(status))) break;
+      options.onProgress?.(35, `${model} 不可用，改用备用模型 ${next}`);
+    }
+  }
+  throw new Error(`改图失败（已尝试 ${models.length} 个模型）：${failures.join("；")}`);
 }
 
 async function generateViaApi(options: GenerateImageOptions, settings: Settings, api: "openai" | "openrouter"): Promise<ImageResult> {

@@ -39,7 +39,9 @@
 
 SSE 事件：`message`、`tool_start`、`progress`、`tool_end`、`state`、`error`、`ping`、`done`。心跳每 15 秒，防止代理断流。
 
-上传链路：浏览器 `POST /api/projects/:id/uploads`（multipart，最多 6 个）→ 写入 `assets/uploads/` 并登记 `AssetRecord(kind=upload)`；聊天消息携带 `attachments`，发给模型前转成项目内路径文本块，模型再用 `set_shot_references` 绑定到分镜。
+上传链路：浏览器 `POST /api/projects/:id/uploads`（multipart，最多 6 个；也接受 `application/json` 的 `{ urls }` 由服务端代下载）→ 写入 `assets/uploads/` 并登记 `AssetRecord(kind=upload)`；聊天消息携带 `attachments`，发给模型前转成项目内路径文本块，模型再用 `set_shot_references` 绑定到分镜。
+
+拖拽与粘贴：整个窗口都是投放区（`web/src/App.tsx` 的 window 级 dragenter/dragover/drop 监听 + `.dropOverlay` 提示），从其它应用拖进来的**文件**走 multipart，只有链接（`text/uri-list` / `<img src>` HTML）时走 JSON `{ urls }` 由服务端下载；截图工具 Cmd+V 也走同一条文件链路。为防止「拖个链接进来」变成内网跳板，服务端对 URL 上传做 SSRF 校验（拒绝本机/内网/IPv6 字面量，手动跟随最多 3 次跳转并逐跳复校验），并按 Content-Type 限制 `image/*`（不含 SVG）与 20MB 上限；落地文件记录 `meta.sourceUrl`。
 
 ## 学习管线
 
@@ -201,6 +203,23 @@ planned → promptReady → generating → done
 - `generate_shot` 遇到 `shot.videoId` 存在且 `status !== "done"` 会直接拒绝，提示改用 `resume_shot`；确实要丢弃旧任务才传 `force=true`。
 - `maxWaitMs` 默认 120 分钟，仅作兜底；真正的恢复手段是 `resume_shot`。
 
+### 读图与构图复用
+
+Agent 本身看不到像素，只能通过 `describe_image` 间接读图。实现放在 `learn/describeImage.ts`：
+
+```
+describe_image({path | paths, focus?})
+  → safeJoin 校验项目内路径 + ffprobe 取真实宽高
+  → chatJson(model="vision") 拿结构化构图 JSON
+  → 落盘 learning/images/<slug>.json（含 sourceMtimeMs）
+  → 返回 subject/shotSize/cameraAngle/composition/lighting/palette/lens + t2vPrompt
+```
+
+- **缓存键是「路径 + 文件修改时间 + focus」**：同一张图反复问不重复计费，图片被替换后自动重算。实测首次约 12 秒，命中缓存约 140 毫秒。
+- **不传 path 时取最近一张图片素材**，覆盖「用户刚上传就问」的场景；一次最多 3 张。
+- 只接受图片扩展名，视频仍走 `study_reference_video`（先切片再逐镜标注）。
+- 提示词里是硬性要求：涉及画面内容必须调工具，禁止反问用户「图里是什么」。
+
 ### 气泡里展示素材
 
 Agent 不能直接把字节塞进消息，只能让前端渲染项目内文件。约定：助手气泡里的 Markdown 媒体语法 + `/files` 绝对 URL。
@@ -256,6 +275,7 @@ Agent 调 generate_shot({shotId, durationSeconds, confirmed:false})
 | `study_reference_video` | 切片 + 标注 + 归纳 + 存风格包 | VLM/LLM |
 | `read_style_bible` | 按 section 读取风格圣经 | 无 |
 | `read_learning_shots` | 读取逐镜明细 | 无 |
+| `describe_image` | 视觉模型读项目内图片，返回构图分析 + 可用的 t2v 英文画面段 | 视觉模型调用（同图同 focus 命中缓存则免费） |
 | `download_xhs_video` | 下载小红书笔记视频到项目 | 无 |
 | `search_skills` / `read_skill` | 检索/读取全局技能 | 无 |
 | `extract_skills` | 从当前项目补跑技能抽取 | 文本模型 |
@@ -271,6 +291,7 @@ Agent 调 generate_shot({shotId, durationSeconds, confirmed:false})
 | `generate_shot` | H3 生成单镜（`confirmed=false` 只弹确认卡片，`true` 才提交；已有未完成任务时会拒绝，除非 `force=true`） | icompify 按次计费；本地网关免费 |
 | `resume_shot` | 接回已提交但本地放弃等待的任务（`probeOnly` 只查状态） | 无（任务已计费） |
 | `stitch_shots` | 统一转码后拼接分镜（硬切/叠化），输出成片 | 无（本地 ffmpeg） |
+| `edit_image` | 拿项目内一张图当原图局部改图，另存为新素材（需 `confirmed=true`） | 按张计费（本地 GPU 免费） |
 | `list_assets` | 查看状态；返回可直接内联的 `media[].markdown` / `assets[].url` | 无 |
 | `list_style_packs` | 查看风格包 | 无 |
 | `apply_style_pack` | 套用风格包并复制引用素材 | 无 |
@@ -282,7 +303,8 @@ Agent 调 generate_shot({shotId, durationSeconds, confirmed:false})
 
 - **换文本/视觉模型**：只改 `settings.json`。任何 OpenAI 兼容网关都能用；工具调用需要网关支持 `tools`。
 - **换视频供应商**：`providers/video/index.ts` 按 `video.provider` 分流；新增后端实现同签名 `generateVideoJob` 并注册分支即可。
-- **换图片供应商**：`providers/image.ts` 有 icompify（SGLang chat 多模态 `/v1/chat/completions`，默认）、OpenAI `/images/generations`、OpenRouter `/images`、本地 GPU（`direct` 本机 spawn / `ssh` 远端调脚本）四类，通过 `image.api` 与 `image.local.mode` 切换；统一返回 `{ bytes, mimeType, model, backend }`。远程后端由 `remoteImageBackend` 从 `api` 或 `baseUrl` 推断，`remoteImageReady` 统一判定是否可用（icompify 无 Key 视为未配置）。
+- **改图**：`editImageWithModel`（`providers/image.ts`）在远程后端打 `/v1/images/edits`（multipart，主备模型 + 502 退避重试口径与出图一致），本地后端把原图作为 `--ref` 条件图；结果由 `edit_image` 工具写进 `assets/edits/` 并登记 asset（`meta.editedFrom` 指向原图，不覆盖原图）。
+- **换图片供应商**：`providers/image.ts` 有 icompify（SGLang chat 多模态 `/v1/chat/completions`，默认；`image.model` + `image.fallbackModel` 主备两个模型，`GenerateImageOptions.model` 可单次覆盖；改图用 `image.editModel`）、OpenAI `/images/generations`、OpenRouter `/images`、本地 GPU（`direct` 本机 spawn / `ssh` 远端调脚本）四类，通过 `image.api` 与 `image.local.mode` 切换；统一返回 `{ bytes, mimeType, model, backend }`。远程后端由 `remoteImageBackend` 从 `api` 或 `baseUrl` 推断，`remoteImageReady` 统一判定是否可用（icompify 无 Key 视为未配置）。
 - **本机出图链路**：`localImageMode` 按 `image.local.mode` 选直连或 SSH；`resolveImageBackend` 决定本机/远端/回退。直连直接 `Bun.spawn` 脚本并读临时产物；SSH 则 `withRemoteWorkdir` 建远端目录 → `scpToRemote` 传条件图 → `sshRun` 执行脚本 → `fetchRemoteFile` 拉回 PNG → `finally` 删除远端目录。仍然「一张一进程」，不做任务排队；需要批量时在 GPU 侧自行批量。
 - **本地视频链路**：`video.provider=local` 时 `providers/video/local.ts` 调自建网关（契约见 [docs/local-gpu.md](docs/local-gpu.md)）：`POST /v1/jobs` → 轮询 `GET /v1/jobs/{id}`（透传 progress/log）→ `GET /v1/jobs/{id}/file` 下载 mp4；取消时先 `DELETE` 再抛错。网关单 worker 串行，出图与出片不能并发；本地只支持 t2va/i2va/ref2va（ref2va 单张参考图），不支持尾帧与参考视频。
 - **加镜头技能**（例如口型、音乐、转场）：新工具 + `agent/prompt.ts` 里的流程说明；重活放到 `src/generate/`。

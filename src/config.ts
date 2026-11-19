@@ -38,6 +38,13 @@ export type Settings = {
     /** 留空时复用 video.apiKey（同一平台同一个 Key）。 */
     apiKey: string;
     model: string;
+    /**
+     * 备用模型：主模型没拿到 200（上游不可用 / 模型没权限 / 限流）时换它再试。
+     * icompify 上两个可用模型是 qwen-image-2.1 与 minimax-h3-image。
+     */
+    fallbackModel: string;
+    /** 改图模型（/v1/images/edits）；留空时用 model。 */
+    editModel: string;
     size: string;
     /** 本地 GPU 出图脚本：本机直连（direct）或 SSH 调用远端脚本（ssh）。 */
     local: {
@@ -116,8 +123,11 @@ export const defaultSettings: Settings = {
     api: "icompify",
     baseUrl: "https://api.icompify.com",
     apiKey: "",
-    // 2026-02 实测可用：qwen-image-2.1（快）、minimax-h3-image（更慢更占显存）
+    // 2026-02 实测可用：qwen-image-2.1（快，默认）、minimax-h3-image（更慢更占显存）
     model: "qwen-image-2.1",
+    fallbackModel: "minimax-h3-image",
+    // 实测两个模型都支持 /v1/images/edits；qwen 保形更稳，默认用它改图。
+    editModel: "qwen-image-2.1",
     size: "2K",
     local: {
       mode: "auto",
@@ -187,7 +197,14 @@ export function normalizeSettings(input: unknown): Settings {
   // 免得给自建的 OpenAI 兼容端点塞一个它不认识的模型名。
   settings.image.baseUrl = String(settings.image.baseUrl ?? "").trim() || defaultSettings.image.baseUrl;
   const imageModel = String(settings.image.model ?? "").trim();
-  settings.image.model = imageModel || (/icompify\.com/i.test(settings.image.baseUrl) ? defaultSettings.image.model : "");
+  const onIcompify = /icompify\.com/i.test(settings.image.baseUrl);
+  settings.image.model = imageModel || (onIcompify ? defaultSettings.image.model : "");
+  const fallbackModel = String(settings.image.fallbackModel ?? "").trim();
+  // 备用模型只在 icompify 下默认；自建网关不替用户瞎猜模型名。
+  settings.image.fallbackModel = fallbackModel || (onIcompify ? defaultSettings.image.fallbackModel : "");
+  if (settings.image.fallbackModel === settings.image.model) settings.image.fallbackModel = "";
+  const editModel = String(settings.image.editModel ?? "").trim();
+  settings.image.editModel = editModel || (onIcompify ? defaultSettings.image.editModel : "");
   settings.learning.sceneThreshold = Number(settings.learning.sceneThreshold) || defaultSettings.learning.sceneThreshold;
   settings.learning.maxShots = Math.min(200, Math.max(1, Number(settings.learning.maxShots) || defaultSettings.learning.maxShots));
   settings.learning.sampleCount = Math.min(3, Math.max(1, Number(settings.learning.sampleCount) || defaultSettings.learning.sampleCount));

@@ -116,6 +116,8 @@ export async function generateStill(options: {
   target: StillTarget;
   id: string;
   promptOverride?: string;
+  /** 显式指定出图模型（覆盖设置；例如定稿改走 minimax-h3-image）。 */
+  model?: string;
   /** 显式指定技能；留空则按「定妆照/场景照」自动检索出图技能（appliesTo 含 still）。 */
   skillIds?: string[];
   signal?: AbortSignal;
@@ -152,6 +154,7 @@ export async function generateStill(options: {
 
   const image = await generateImageWithModel({
     prompt: composed,
+    model: options.model?.trim() || undefined,
     size: settings.image.size,
     ratio: project.brief.aspectRatio ?? "16:9",
     references,

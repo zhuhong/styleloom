@@ -71,7 +71,7 @@ Then fill in `data/settings.json` (or use the in-app **Settings** dialog):
 | `llm.baseUrl` / `apiKey` / `model` | Any OpenAI-compatible text endpoint that supports tool calling |
 | `llm.visionModel` | Model that accepts images; used for per-shot annotation |
 | `video.provider` / `video.apiKey` | `icompify` (default, billed) or `local` (self-hosted GPU gateway) |
-| `image.*` | Stills backend: `icompify` cloud image models (`qwen-image-2.1` by default), `local` GPU, or `openrouter` / `openai`; no key falls back to reference keyframes |
+| `image.*` | Stills + edits backend: `icompify` cloud image models (`qwen-image-2.1` by default), `local` GPU, or `openrouter` / `openai`; no key falls back to reference keyframes |
 | `xhs.*` / `ffmpeg.*` / `learning.*` | Downloader, binary paths, slicing parameters |
 
 Everything else — data layout, persistent service, LAN access, reverse proxy, backup, troubleshooting, self-hosted GPU setup — is in the **[deployment guide](docs/deploy.md)** and **[local GPU backend](docs/local-gpu.md)**.

@@ -26,6 +26,8 @@ type ChatPaneProps = {
   onRemoveUpload: (index: number) => void;
   onOpenMedia: (media: MediaRequest) => void;
   onFilesDropped: (files: FileList | File[]) => void;
+  /** 统一的拖拽入口：文件、从其它应用拖来的图片链接、data: 图片都走这里。 */
+  onDropTransfer: (dataTransfer: DataTransfer) => void;
   onConfirmSubmit: (item: { id: string; shotId: string; title: string; durationSeconds?: number; force?: boolean }) => void;
   onConfirmDecline: (item: { id: string; shotId: string }) => void;
 };
@@ -146,6 +148,7 @@ export function ChatPane({
   onRemoveUpload,
   onOpenMedia,
   onFilesDropped,
+  onDropTransfer,
   onConfirmSubmit,
   onConfirmDecline,
 }: ChatPaneProps) {
@@ -272,9 +275,11 @@ export function ChatPane({
           if (!composer.contains(event.relatedTarget as Node | null)) setDragging(false);
         }}
         onDrop={(event) => {
+          // 交给窗口级的统一入口处理（它同时支持文件与「从其它应用拖来的链接/HTML」）
           event.preventDefault();
+          event.stopPropagation();
           setDragging(false);
-          if (event.dataTransfer?.files?.length) onFilesDropped(event.dataTransfer.files);
+          if (event.dataTransfer) onDropTransfer(event.dataTransfer);
         }}
       >
         <button
@@ -306,12 +311,12 @@ export function ChatPane({
         <div class="composerMain">
           <div id="pendingUploads" class="pendingUploads" hidden={!pendingUploads.length}>
             {pendingUploads.map((item, index) => {
-              const label = item.asset?.label || item.file.name;
+              const label = item.asset?.label || item.file?.name || t("misc.uploading");
               const meta = item.status === "uploading"
                 ? t("misc.uploading")
                 : item.status === "error"
                   ? (item.error || t("errors.uploadFailedShort"))
-                  : formatFileSize(item.size ?? item.file.size);
+                  : formatFileSize(item.size ?? item.file?.size ?? 0);
               const canPreview = item.status === "done" && item.previewUrl;
               return (
                 <div key={`upload-${index}`} class={`uploadChip ${item.status}`}>

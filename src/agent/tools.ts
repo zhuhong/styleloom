@@ -1,16 +1,19 @@
+import { writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { dataDir } from "../config";
 import type { Settings } from "../config";
 import type { AgentEvent, PromptMode, Project, ShotPlan, ShotReferenceImage, ShotReferenceVideo, SkillKind, Stage, StyleBible } from "../types";
 import type { ToolSpec } from "../providers/llm";
-import { copyInto, ensureDir, exists, nowIso, safeJoin } from "../util/fs";
+import { copyInto, ensureDir, exists, nowIso, safeJoin, stamp } from "../util/fs";
 import { addAsset, deleteProject, getManifest, projectDir, renameProject } from "../store/projects";
 import { applyStylePack, listStylePacks } from "../store/library";
 import { studyReferenceVideo } from "../learn/study";
+import { describeImage } from "../learn/describeImage";
 import { resumeShot } from "../generate/shot";
 import { activeJobForShot, clearJobsForProject, listJobs, startRenderJob } from "../generate/jobs";
 import { generateStill } from "../generate/still";
+import { editImageWithModel } from "../providers/image";
 import { stitchShots } from "../generate/stitch";
 import { H3_SAFE_MIN_SECONDS, normalizeShotDuration } from "../util/duration";
 import { composeShotPrompt, prepareReferences } from "../generate/prompt";
@@ -210,6 +213,19 @@ export const toolSpecs: ToolSpec[] = [
     parameters: { type: "object", properties: {} },
   },
   {
+    name: "describe_image",
+    description: "用视觉模型读一张项目内图片（用户上传的参考图、定妆照、场景照），返回结构化构图分析：主体位置、景别、视角、构图法、光线、色调、焦段，以及可直接用于 t2v 的英文画面段落。用户上传图片并要求学构图、按图生成、看图改提示词时必须先调用它，不要反问用户图里画了什么。单张约一次视觉模型调用；同一张图同样 focus 的重复调用走本地缓存不重复计费。",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "项目内相对路径，如 assets/uploads/xxx.png。省略时取最近一张图片素材" },
+        paths: { type: "array", items: { type: "string" }, description: "可选，一次最多 3 张；与 path 二选一，同时给出会合并" },
+        focus: { type: "string", description: "可选，分析重点，如 构图落点 / 光线方向 / 色调 / 焦段" },
+        refresh: { type: "boolean", description: "忽略缓存重新分析，默认 false" },
+      },
+    },
+  },
+  {
     name: "search_skills",
     description: "搜索技能库（本机累积 data/skills + 仓库公开 skills/）。规划分镜或写提示词前先搜索；生成定妆照/场景照前可用 kind=still 或 surface=still 找出图技能。公开技能默认 candidate/0.32，仅作知识参考；本机技能优先。",
     parameters: {
@@ -354,7 +370,7 @@ export const toolSpecs: ToolSpec[] = [
   },
   {
     name: "generate_still",
-    description: "生成定妆照或场景照。会自动带上「出图技能」（kind=still，或 appliesTo 含 still）：默认按目标检索并注入想要的提示词片段，也可用 skillIds 指定。本地 GPU（直连/SSH）免费，远程图片接口（默认 icompify qwen-image-2.1）按张计费；都不可用时回退为参考片关键帧。",
+    description: "生成定妆照或场景照。会自动带上「出图技能」（kind=still，或 appliesTo 含 still）：默认按目标检索并注入想要的提示词片段，也可用 skillIds 指定。本地 GPU（直连/SSH）免费，远程图片接口（默认 icompify qwen-image-2.1，可用 model 切到 minimax-h3-image；主模型不可用时自动退到 image.fallbackModel）按张计费；都不可用时回退为参考片关键帧。",
     parameters: {
       type: "object",
       properties: {
@@ -362,8 +378,25 @@ export const toolSpecs: ToolSpec[] = [
         id: { type: "string", description: "风格圣经里的角色/场景 id" },
         prompt: { type: "string", description: "可选，覆盖默认提示词（技能片段仍会追加）" },
         skillIds: { type: "array", items: { type: "string" }, description: "可选，指定本次采用的出图技能 id；留空按定妆照/场景照自动检索" },
+        model: { type: "string", description: "可选，覆盖出图模型（icompify 可选 qwen-image-2.1 / minimax-h3-image）；不传用 image.model，失败自动退到 image.fallbackModel" },
       },
       required: ["target", "id"],
+    },
+  },
+  {
+    name: "edit_image",
+    description: "改图：拿项目内已有的一张图片当原图，按修改要求局部修改（换色/换装/加删道具/改姿态），原图保留、结果另存为新的素材。icompify 与本地 GPU 支持；OpenRouter 没有编辑接口会直接报错。按张计费，必须 confirmed=true。确认流程同上：先用 confirmed=false 弹确认卡片，用户点击后系统会发来确认消息，再传 confirmed=true。",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "原图的项目内相对路径（如 assets/stills/character-c1-xxx.png，先用 list_assets 确认）" },
+        prompt: { type: "string", description: "修改要求，英文更稳；只描述要改的部分，并显式要求其余保持不变" },
+        confirmed: { type: "boolean", description: "用户已明确同意（会产生费用）" },
+        model: { type: "string", description: "可选，覆盖改图模型；不传用 image.editModel（默认 qwen-image-2.1），失败自动退到 image.fallbackModel" },
+        size: { type: "string", description: "可选，输出尺寸（宽x高 或 1K/2K）；不传沿用设置" },
+        label: { type: "string", description: "可选，素材栏显示的名字" },
+      },
+      required: ["path", "prompt", "confirmed"],
     },
   },
   {
@@ -852,10 +885,97 @@ async function generateStillTool(ctx: ToolContext, args: Args) {
     id: reqString(args, "id"),
     promptOverride: optString(args, "prompt"),
     skillIds: Array.isArray(args.skillIds) ? args.skillIds.map(value => String(value)).filter(Boolean) : undefined,
+    model: optString(args, "model"),
     signal: ctx.signal,
     onProgress: (percent, label) => ctx.emit({ type: "progress", scope: "generate_still", percent, label }),
   });
   return { ok: true, ...result };
+}
+
+async function editImageTool(ctx: ToolContext, args: Args) {
+  if (args.confirmed !== true) {
+    throw new Error("改图会真实计费，必须先向用户展示要改的图和修改要求，得到明确同意后传 confirmed=true");
+  }
+  const relative = reqString(args, "path");
+  const prompt = reqString(args, "prompt");
+  const root = projectDir(ctx.project.id);
+  const source = safeJoin(root, relative);
+  if (!(await exists(source))) throw new Error(`原图不存在：${relative}（先用 list_assets 确认路径）`);
+  const result = await editImageWithModel({
+    source,
+    prompt,
+    model: optString(args, "model"),
+    size: optString(args, "size"),
+    ratio: ctx.project.brief.aspectRatio ?? "1:1",
+    signal: ctx.signal,
+    onProgress: (percent, label) => ctx.emit({ type: "progress", scope: "edit_image", percent, label }),
+  });
+  const extension = result.mimeType.includes("png") ? ".png" : result.mimeType.includes("webp") ? ".webp" : ".jpg";
+  const target = `assets/edits/edit-${stamp()}${extension}`;
+  await ensureDir(join(root, "assets", "edits"));
+  await writeFile(join(root, target), result.bytes);
+  addAsset(ctx.project, {
+    kind: "still",
+    path: target,
+    label: optString(args, "label") || `改图 ${relative.split("/").pop() || ""}`,
+    meta: { editedFrom: relative, prompt, model: result.model, backend: result.backend, seconds: result.seconds },
+  });
+  await ctx.save();
+  return {
+    ok: true,
+    path: target,
+    source: relative,
+    model: result.model,
+    backend: result.backend,
+    seconds: result.seconds,
+    note: "已另存为新素材，原图未被覆盖。",
+  };
+}
+
+const IMAGE_PATH_RE = /\.(jpe?g|png|webp|gif|avif|bmp)$/i;
+
+async function describeImageTool(ctx: ToolContext, args: Args) {
+  const explicit = [...(optString(args, "path") ? [optString(args, "path")!] : []), ...stringArray(args, "paths")];
+  let targets = [...new Set(explicit)];
+  let autoPicked = false;
+  if (!targets.length) {
+    const imageAssets = ctx.project.assets.filter(asset => IMAGE_PATH_RE.test(asset.path));
+    const latest = imageAssets[imageAssets.length - 1];
+    if (!latest) {
+      return { ok: false, error: "项目里还没有图片素材。请让用户先在聊天框上传图片，或先用 generate_still 出图。" };
+    }
+    targets = [latest.path];
+    autoPicked = true;
+  }
+  if (targets.length > 3) throw new Error("一次最多分析 3 张图片，请分批调用");
+
+  const projectId = ctx.project.id;
+  const url = (path: string) => `/files/${encodeURIComponent(projectId)}/${path.split("/").map(encodeURIComponent).join("/")}`;
+  const images = [];
+  for (const [index, path] of targets.entries()) {
+    ctx.emit({ type: "progress", scope: "describe_image", percent: (index / targets.length) * 100, label: `读图 ${index + 1}/${targets.length}` });
+    const analysis = await describeImage({
+      project: ctx.project,
+      settings: ctx.settings,
+      path,
+      focus: optString(args, "focus"),
+      refresh: args.refresh === true,
+      signal: ctx.signal,
+    });
+    images.push({
+      ...analysis,
+      url: url(path),
+      markdown: `![构图参考](${url(path)})`,
+    });
+  }
+  return {
+    ok: true,
+    projectId,
+    images,
+    autoPicked,
+    note: autoPicked ? "未指定 path，已自动取最近一张图片素材；如需别的图请显式传 path。" : undefined,
+    nextStep: "把 images[].t2vPrompt 当作画面段写进 t2v 分镜；构图落点、景别、视角来自 images[].composition/shotSize/cameraAngle，不要改写这些结论。",
+  };
 }
 
 async function listAssets(ctx: ToolContext) {
@@ -1049,6 +1169,7 @@ const handlers: Record<string, (ctx: ToolContext, args: Args) => Promise<unknown
   study_reference_video: study,
   read_style_bible: readBible,
   read_learning_shots: readShots,
+  describe_image: describeImageTool,
   search_skills: searchSkillsTool,
   read_skill: readSkillTool,
   extract_skills: extractSkillsTool,
@@ -1064,6 +1185,7 @@ const handlers: Record<string, (ctx: ToolContext, args: Args) => Promise<unknown
   generate_shot: generateShotTool,
   resume_shot: resumeShotTool,
   generate_still: generateStillTool,
+  edit_image: editImageTool,
   stitch_shots: stitchShotsTool,
   list_assets: listAssets,
   list_style_packs: async (ctx, args) => ({ ok: true, packs: await listStylePacks(), note: "可用 apply_style_pack 套用" }),

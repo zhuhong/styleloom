@@ -169,7 +169,10 @@ export type RenderJob = {
 };
 
 export type PendingUpload = {
-  file: File;
+  /** 文件上传有 File；从其它应用拖来的链接上传时没有。 */
+  file?: File;
+  /** 链接上传时的原始地址，用于错误提示与调试。 */
+  sourceUrl?: string;
   kind: "image" | "video";
   previewUrl: string;
   status: "uploading" | "done" | "error";

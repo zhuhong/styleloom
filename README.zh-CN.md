@@ -71,7 +71,7 @@ bun start            # http://127.0.0.1:8787
 | `llm.baseUrl` / `apiKey` / `model` | 任意支持 tool calling 的 OpenAI 兼容文本接口 |
 | `llm.visionModel` | 支持图片输入的模型，逐镜拉片用 |
 | `video.provider` / `video.apiKey` | `icompify`（默认，计费）或 `local`（自建 GPU 网关） |
-| `image.*` | 定妆照后端：`icompify` 云端图片模型（默认 `qwen-image-2.1`）、本地 GPU，或 `openrouter` / `openai`；没 Key 时回退参考帧 |
+| `image.*` | 定妆照与改图后端：`icompify` 云端图片模型（默认 `qwen-image-2.1`）、本地 GPU，或 `openrouter` / `openai`；没 Key 时回退参考帧 |
 | `xhs.*` / `ffmpeg.*` / `learning.*` | 下载器、二进制路径、切片参数 |
 
 其余内容——数据目录、常驻服务、局域网访问、反向代理、备份、排错、自建 GPU——见 **[部署配置指南](docs/deploy.md)** 与 **[本地 GPU 后端](docs/local-gpu.md)**。

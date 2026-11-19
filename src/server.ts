@@ -21,6 +21,87 @@ function messageOf(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
+const imageExtensionByMime: Record<string, string> = {
+  "image/png": ".png",
+  "image/jpeg": ".jpg",
+  "image/webp": ".webp",
+  "image/gif": ".gif",
+  "image/avif": ".avif",
+  "image/bmp": ".bmp",
+};
+
+/**
+ * 拒绝内网/本机地址，避免「拖一个链接进来」变成打内网的跳板。
+ * ACT: 只做字面量判断（hostname 里的 IP 或 localhost 后缀），不解析 DNS，
+ * 也不防 DNS rebinding；自行部署到不可信网络时请再加出网代理或白名单。
+ */
+function isBlockedUploadHost(hostname: string) {
+  const host = hostname.trim().toLowerCase().replace(/\.$/, "");
+  if (!host) return true;
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal") || host.endsWith(".home.arpa")) return true;
+  if (host.includes(":")) return true; // IPv6 字面量一律拒绝
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (v4) {
+    const a = Number(v4[1]);
+    const b = Number(v4[2]);
+    if (a === 0 || a === 10 || a === 127 || a >= 224) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true;
+  }
+  return false;
+}
+
+function assertRemoteImageUrl(raw: string) {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`不是合法链接：${raw.slice(0, 120)}`);
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error(`只支持 http(s) 链接：${raw.slice(0, 120)}`);
+  if (isBlockedUploadHost(url.hostname)) throw new Error(`拒绝访问内网地址：${url.hostname}`);
+  return url;
+}
+
+/**
+ * 下载一个远端图片链接（从其它应用拖进来的图片地址）。
+ * 手动跟随最多 3 次跳转并在每一跳重新校验主机，避免 302 到内网。
+ */
+async function downloadRemoteImage(raw: string) {
+  let url = assertRemoteImageUrl(raw);
+  for (let hop = 0; hop <= 3; hop += 1) {
+    const response = await fetch(url, {
+      redirect: "manual",
+      signal: AbortSignal.timeout(20_000),
+      headers: { Accept: "image/*" },
+    }).catch(error => {
+      throw new Error(`下载失败：${(error as Error).message}`);
+    });
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get("location");
+      if (!location) throw new Error(`跳转缺少 Location：${url.hostname}`);
+      if (hop === 3) throw new Error("跳转次数过多");
+      url = assertRemoteImageUrl(new URL(location, url).toString());
+      continue;
+    }
+    if (!response.ok) throw new Error(`下载失败（HTTP ${response.status}）：${url.hostname}${url.pathname.slice(0, 60)}`);
+    const mimeType = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+    if (mimeType === "image/svg+xml") throw new Error("不支持 SVG，请改用 JPG/PNG/WebP");
+    if (!mimeType.startsWith("image/")) throw new Error(`链接不是图片（${mimeType || "未知类型"}）`);
+    const extension = imageExtensionByMime[mimeType];
+    if (!extension) throw new Error(`不支持的图片类型：${mimeType}`);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const maxBytes = 20 * 1024 * 1024;
+    if (!bytes.byteLength) throw new Error("链接返回空内容");
+    if (bytes.byteLength > maxBytes) throw new Error(`图片超过上限 ${maxBytes / 1024 / 1024}MB`);
+    const name = basename(url.pathname) || "dropped";
+    return { bytes, mimeType, extension, name, sourceUrl: url.toString() };
+  }
+  throw new Error("跳转次数过多");
+}
+
 function historyMessages(messages: LlmMessage[]) {
   return messages
     .filter(message => (message.role === "user" || message.role === "assistant")
@@ -353,6 +434,33 @@ const server = Bun.serve({
         if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
         const projectId = decodeURIComponent(uploadMatch[1]);
         const project = await getProject(projectId);
+        if ((request.headers.get("content-type") ?? "").includes("application/json")) {
+          // 从其它应用拖进来的是链接（text/uri-list / <img src>），由服务端代下载：
+          // 浏览器直连第三方图床会被 CORS 挡住，而且服务端能做 SSRF 与大小校验。
+          const body = (await request.json().catch(() => ({}))) as { urls?: unknown };
+          const urls = Array.isArray(body.urls)
+            ? [...new Set(body.urls.filter((item): item is string => typeof item === "string").map(item => item.trim()).filter(Boolean))]
+            : [];
+          if (!urls.length) throw new Error("没有收到图片链接");
+          if (urls.length > 6) throw new Error("一次最多上传 6 个文件");
+          const downloaded = [];
+          for (const url of urls) downloaded.push(await downloadRemoteImage(url));
+          const uploaded = [];
+          await ensureDir(join(projectDir(project.id), "assets", "uploads"));
+          for (const item of downloaded) {
+            const base = slugify(basename(item.name, extname(item.name)), "dropped");
+            const relative = `assets/uploads/${stamp()}-${crypto.randomUUID().slice(0, 8)}-${base}${item.extension}`;
+            await writeFile(safeJoin(projectDir(project.id), relative), item.bytes);
+            uploaded.push(addAsset(project, {
+              kind: "upload",
+              path: relative,
+              label: `${basename(item.name, extname(item.name)) || "拖拽图片"}${item.extension}`,
+              meta: { mimeType: item.mimeType, size: item.bytes.byteLength, sourceUrl: item.sourceUrl },
+            }));
+          }
+          await saveProject(project);
+          return json({ assets: uploaded });
+        }
         const form = await request.formData();
         const files = form.getAll("files").filter(item => typeof item !== "string") as File[];
         if (!files.length) throw new Error("没有收到上传文件");

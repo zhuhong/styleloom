@@ -628,3 +628,32 @@ button.ghost:focus-visible, .ghost:focus-visible {
 
 .settingsDialog label span { line-height: 1.35; }
 html[lang="en"] .settingsDialog label { grid-template-columns: 176px 1fr; }
+
+/* 全窗口拖拽投放提示：只做视觉覆盖，不拦截指针事件 */
+.dropOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--bg, #0f1115) 72%, transparent);
+  border: 2px dashed var(--accent, #6ea8fe);
+  border-radius: 12px;
+}
+
+.dropCard {
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  padding: 18px 24px;
+  text-align: center;
+  background: var(--panel, #171a21);
+  border: 1px solid var(--border, #2a2f3a);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 35%);
+}
+
+.dropCard b { font-size: 15px; }
+.dropCard span { font-size: 12px; opacity: 0.75; max-width: 340px; }

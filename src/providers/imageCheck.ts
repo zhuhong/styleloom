@@ -63,7 +63,7 @@ export async function checkImageBackend(signal?: AbortSignal) {
   if (wantsRemote) {
     const backend = remoteImageBackend(settings);
     if (apiKey) {
-      lines.push(`远程图片模型：已配置（${backend} / ${model}）`);
+      lines.push(`远程图片模型：已配置（${backend} / ${model}${settings.image.fallbackModel ? `，备用 ${settings.image.fallbackModel}` : ""}${settings.image.editModel ? `，改图 ${settings.image.editModel}` : ""}）`);
       ok = true;
     } else {
       lines.push(`远程图片模型：缺少 API Key（${backend} / ${model}）`);
