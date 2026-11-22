@@ -9,9 +9,8 @@ import {
 } from "../lib/utils";
 import type { ToolCardState } from "../lib/types";
 import { t } from "../lib/i18n";
-import { renderMarkdown } from "../lib/markdown";
-
-const panelScopedTools = new Set(["generate_shot", "resume_shot"]);
+import { panelScopedTools } from "../lib/panelTools";
+import { Markdown } from "./Markdown";
 
 type ChatPaneProps = {
   projectId: string | null;
@@ -135,6 +134,11 @@ function EmptyChat() {
   );
 }
 
+/** 距底部多少像素内仍视为「贴底」，才自动跟随新消息。 */
+const STICK_BOTTOM_PX = 80;
+/** 长对话默认只挂载最近 N 条，点「更早」再展开，避免 DOM 无限涨。 */
+const CHAT_WINDOW = 48;
+
 export function ChatPane({
   projectId,
   items,
@@ -154,11 +158,44 @@ export function ChatPane({
 }: ChatPaneProps) {
   const messagesRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const stickBottomRef = useRef(true);
   const [dragging, setDragging] = useState(false);
+  const [showJumpLatest, setShowJumpLatest] = useState(false);
+  const [showAllHistory, setShowAllHistory] = useState(false);
 
   const busy = streaming || uploading > 0;
+  const hiddenCount = showAllHistory || items.length <= CHAT_WINDOW
+    ? 0
+    : items.length - CHAT_WINDOW;
+  const visibleItems = hiddenCount > 0 ? items.slice(hiddenCount) : items;
 
   useEffect(() => {
+    // 切项目 / 历史重置时收起展开态。
+    setShowAllHistory(false);
+  }, [projectId]);
+
+  const syncStickState = () => {
+    const el = messagesRef.current;
+    if (!el) return;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const stuck = distance <= STICK_BOTTOM_PX;
+    stickBottomRef.current = stuck;
+    setShowJumpLatest(!stuck && items.length > 0);
+  };
+
+  const jumpToLatest = () => {
+    const el = messagesRef.current;
+    if (!el) return;
+    stickBottomRef.current = true;
+    setShowJumpLatest(false);
+    el.scrollTop = el.scrollHeight;
+  };
+
+  useEffect(() => {
+    if (!stickBottomRef.current) {
+      setShowJumpLatest(items.length > 0);
+      return;
+    }
     const el = messagesRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [items, pendingUploads, streaming]);
@@ -196,14 +233,25 @@ export function ChatPane({
 
   return (
     <section class="chatPane">
+      <div class="messagesWrap">
       <div
         id="messages"
         ref={messagesRef}
         class="messages"
         onClick={handleMessagesClick}
+        onScroll={syncStickState}
       >
         {!items.length ? <EmptyChat /> : null}
-        {items.map((item) => {
+        {hiddenCount > 0 ? (
+          <button
+            type="button"
+            class="loadEarlier"
+            onClick={() => setShowAllHistory(true)}
+          >
+            {t("chat.loadEarlier", { count: hiddenCount })}
+          </button>
+        ) : null}
+        {visibleItems.map((item) => {
           if (item.kind === "confirm") {
             const settled = item.status !== "pending";
             return (
@@ -235,12 +283,13 @@ export function ChatPane({
             );
           }
           if (item.kind === "bubble") {
-            const isMarkdown = item.role === "assistant" && !item.isError;
-            const className = `bubble ${item.isError ? "error" : item.role}${isMarkdown ? " markdown" : ""}`;
+            // 流式中用纯文本，避免每个 delta 都重跑 Markdown；结束后再排版。
+            const isMarkdown = item.role === "assistant" && !item.isError && !item.streaming;
+            const className = `bubble ${item.isError ? "error" : item.role}${isMarkdown ? " markdown" : ""}${item.streaming ? " streaming" : ""}`;
             return (
               <div key={item.id} class={className}>
                 {isMarkdown ? (
-                  <span dangerouslySetInnerHTML={{ __html: renderMarkdown(item.content, projectId ?? undefined) }} style={{ display: "contents" }} />
+                  <Markdown content={item.content} projectId={projectId ?? undefined} />
                 ) : (
                   item.content
                 )}
@@ -261,6 +310,12 @@ export function ChatPane({
           }
           return <ToolCardView key={item.id} card={item.card} />;
         })}
+      </div>
+      {showJumpLatest ? (
+        <button type="button" class="jumpLatest" onClick={jumpToLatest}>
+          {t("chat.jumpLatest")}
+        </button>
+      ) : null}
       </div>
       <form
         id="composer"

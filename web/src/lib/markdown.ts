@@ -366,8 +366,22 @@ function renderBlocks(lines, projectId) {
   return output;
 }
 
+/** 历史气泡内容不变时避免反复解析。 */
+const markdownCache = new Map();
+const MARKDOWN_CACHE_LIMIT = 80;
+
 /** 将 Markdown 转成安全 HTML；只用于对话气泡等可信容器。 */
 export function renderMarkdown(source, projectId) {
-  const lines = String(source ?? "").replace(/\r\n?/g, "\n").split("\n");
-  return renderBlocks(lines, projectId).join("");
+  const text = String(source ?? "");
+  const key = `${projectId ?? ""}::${text}`;
+  const cached = markdownCache.get(key);
+  if (cached != null) return cached;
+  const lines = text.replace(/\r\n?/g, "\n").split("\n");
+  const html = renderBlocks(lines, projectId).join("");
+  markdownCache.set(key, html);
+  if (markdownCache.size > MARKDOWN_CACHE_LIMIT) {
+    const oldest = markdownCache.keys().next().value;
+    if (oldest != null) markdownCache.delete(oldest);
+  }
+  return html;
 }

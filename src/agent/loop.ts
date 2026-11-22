@@ -97,6 +97,8 @@ export async function runAgentTurn(
   try {
     for (let step = 0; step < MAX_STEPS; step++) {
       signal.throwIfAborted();
+      const messageId = crypto.randomUUID();
+      let streamed = false;
       const result = await chat({
         messages: [
           { role: "system", content: await buildSystemPrompt(project, settings) },
@@ -110,9 +112,21 @@ export async function runAgentTurn(
         // 项目已删：只允许收尾文本，不再暴露会写盘的工具。
         tools: meta.deleted ? undefined : toolSpecs,
         signal,
+        onDelta: delta => {
+          if (!streamed) {
+            streamed = true;
+            emit({ type: "message_start", id: messageId, role: "assistant" });
+          }
+          emit({ type: "message_delta", id: messageId, delta });
+        },
       });
       const content = result.content.trim();
-      if (content) emit({ type: "message", role: "assistant", content });
+      if (streamed) {
+        emit({ type: "message_end", id: messageId });
+      } else if (content) {
+        // 非流式回退或空增量：整段一次推送。
+        emit({ type: "message", role: "assistant", content });
+      }
       if (!result.toolCalls.length || meta.deleted) {
         messages.push({ role: "assistant", content });
         break;

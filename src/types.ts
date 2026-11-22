@@ -272,6 +272,10 @@ export type ProjectSummary = {
 
 export type AgentEvent =
   | { type: "message"; role: "user" | "assistant"; content: string; attachments?: ChatAttachment[] }
+  /** 流式助手气泡：先 start，再多次 delta，最后 end（切 Markdown 排版）。 */
+  | { type: "message_start"; id: string; role: "assistant" }
+  | { type: "message_delta"; id: string; delta: string }
+  | { type: "message_end"; id: string }
   | { type: "confirmation"; id: string; action: "submit_shot"; shotId: string; title: string; durationSeconds?: number; force?: boolean }
   | { type: "tool_start"; id: string; name: string; args: unknown }
   | { type: "tool_end"; id: string; name: string; ok: boolean; preview: string; elapsedMs: number }

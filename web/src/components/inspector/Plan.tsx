@@ -82,13 +82,12 @@ export function Plan({
                       openUrl: videoUrl,
                     })}
                   >
-                    <video
-                      muted
-                      preload="metadata"
-                      playsinline
-                      poster={posterUrl || undefined}
-                      src={videoUrl}
-                    />
+                    {/* 列表只挂静态封面，避免多分镜同时 preload video metadata。 */}
+                    {posterUrl ? (
+                      <img src={posterUrl} alt="" loading="lazy" />
+                    ) : (
+                      <span class="planPosterFallback" aria-hidden="true" />
+                    )}
                     <span class="playBadge"><span>▶</span></span>
                   </button>
                 ) : (

@@ -28,6 +28,7 @@ export type InspectorProps = {
   assetFilter: string;
   skillFilter: string;
   showAllSkills: boolean;
+  className?: string;
   onTabChange: (tab: InspectorTab) => void;
   onAssetFilter: (filter: string) => void;
   onSkillFilter: (filter: string) => void;
@@ -38,6 +39,7 @@ export type InspectorProps = {
   onSkillOutcome?: (skillId: string, rating: SkillRating) => void;
   skillFeedbackBusy?: string | null;
   skillFeedbackNotes?: Record<string, { rating: SkillRating; count?: number }>;
+  onCloseDrawer?: () => void;
 };
 
 export function Inspector({
@@ -49,6 +51,7 @@ export function Inspector({
   assetFilter,
   skillFilter,
   showAllSkills,
+  className,
   onTabChange,
   onAssetFilter,
   onSkillFilter,
@@ -59,6 +62,7 @@ export function Inspector({
   onSkillOutcome,
   skillFeedbackBusy,
   skillFeedbackNotes,
+  onCloseDrawer,
 }: InspectorProps) {
   const rootRef = useRef<HTMLElement>(null);
 
@@ -74,9 +78,11 @@ export function Inspector({
     return fallback;
   }, [project, inspectorTab, jobs, skills.length]);
 
+  const rootClass = `inspector${className ? ` ${className}` : ""}`;
+
   if (!project) {
     return (
-      <aside id="inspector" class="inspector" ref={rootRef}>
+      <aside id="inspector" class={rootClass} ref={rootRef}>
         <div class="emptyState small">
           <p>{t("inspector.emptyProject")}</p>
         </div>
@@ -88,11 +94,13 @@ export function Inspector({
   const assetCount = (project.assets || []).length;
   const skillCount = skills.length;
   const runningJobs = jobs.filter((job) => job.status === "running" || job.status === "pending").length;
+  // Tab 角标：有进行中优先显示进行中数量；否则显示队列条数，避免「有完成任务但角标空白」。
+  const jobsBadge = runningJobs || jobs.length;
 
   const tabs: [InspectorTab, string, number][] = [
     ["overview", t("inspector.tabOverview"), 0],
     ["shots", t("inspector.tabShots"), planCount],
-    ["jobs", t("inspector.tabJobs"), runningJobs],
+    ["jobs", t("inspector.tabJobs"), jobsBadge],
     ["assets", t("inspector.tabAssets"), assetCount],
     ["skills", t("inspector.tabSkills"), skillCount],
   ];
@@ -165,14 +173,26 @@ export function Inspector({
   };
 
   return (
-    <aside id="inspector" class="inspector" ref={rootRef}>
+    <aside id="inspector" class={rootClass} ref={rootRef}>
       <header class="inspectorHeader">
         <div class="inspectorTitleRow">
           <div class="inspectorTitleText">
             <h2>{project.title}</h2>
             <p>{t("inspector.updatedAt", { time: formatUpdatedAt(project.updatedAt) })}</p>
           </div>
-          <span class="stageBadge">{stageLabel(project.stage)}</span>
+          <div class="inspectorTitleActions">
+            <span class="stageBadge">{stageLabel(project.stage)}</span>
+            {onCloseDrawer ? (
+              <button
+                type="button"
+                class="iconButton drawerClose"
+                aria-label={t("misc.close")}
+                onClick={onCloseDrawer}
+              >
+                ×
+              </button>
+            ) : null}
+          </div>
         </div>
         <nav class="inspectorTabs" role="tablist">
           {tabs.map(([id, label, count]) => (

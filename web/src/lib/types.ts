@@ -202,6 +202,8 @@ export type ChatItem =
       role: "user" | "assistant";
       content: string;
       isError?: boolean;
+      /** 流式生成中：先纯文本，结束后再 Markdown。 */
+      streaming?: boolean;
       attachments?: ChatAttachment[];
     }
   | {

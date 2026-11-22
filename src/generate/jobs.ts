@@ -31,10 +31,19 @@ let renderTerminalHook: ((job: RenderJob) => void) | undefined;
 
 /** 终态任务只做短暂展示（让用户能点「播放」），不长期占用内存。 */
 const TERMINAL_STATUSES = new Set<RenderJobStatus>(["done", "failed"]);
+
+/** 环境变量空字符串时 Number("") === 0，会把终态任务瞬间清光；这里必须当「未设置」处理。 */
+function envPositiveInt(name: string, fallback: number) {
+  const raw = process.env[name];
+  if (raw == null || !String(raw).trim()) return fallback;
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
 /** 终态任务保留时长：超过就清掉，数据已在 project.json 里。 */
-export const TERMINAL_TTL_MS = Number(process.env.RENDER_JOB_TTL_MS ?? 60 * 60 * 1000);
+export const TERMINAL_TTL_MS = envPositiveInt("RENDER_JOB_TTL_MS", 60 * 60 * 1000);
 /** 每个项目最多保留的终态任务数，防止连跑多条时无限堆积。 */
-export const TERMINAL_MAX_PER_PROJECT = Number(process.env.RENDER_JOB_MAX_TERMINAL ?? 5);
+export const TERMINAL_MAX_PER_PROJECT = envPositiveInt("RENDER_JOB_MAX_TERMINAL", 5);
 
 /**
  * 清理终态任务，返回被清掉的 id。

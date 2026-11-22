@@ -1,3 +1,4 @@
+import { useEffect, useState } from "preact/hooks";
 import type { MediaRequest, Project } from "../../lib/types";
 import {
   fileUrl,
@@ -7,6 +8,8 @@ import { t } from "../../lib/i18n";
 
 type AssetFilter = "all" | "video" | "image" | "audio" | "other";
 
+const PAGE_SIZE = 24;
+
 type AssetsProps = {
   project: Project;
   assetFilter: string;
@@ -15,6 +18,7 @@ type AssetsProps = {
 };
 
 export function Assets({ project, assetFilter, onAssetFilter, onOpenMedia }: AssetsProps) {
+  const [limit, setLimit] = useState(PAGE_SIZE);
   const items = (project.assets || []).slice().reverse().map((asset) => ({
     asset,
     type: (mediaTypeForPath(asset.path) || "other") as AssetFilter | "other",
@@ -33,7 +37,11 @@ export function Assets({ project, assetFilter, onAssetFilter, onOpenMedia }: Ass
 
   const filter = filters.some(([value]) => value === assetFilter) ? assetFilter as AssetFilter : "all";
   const filtered = filter === "all" ? items : items.filter((item) => item.type === filter);
-  const visible = filtered.slice(0, 24);
+  const visible = filtered.slice(0, limit);
+
+  useEffect(() => {
+    setLimit(PAGE_SIZE);
+  }, [project.id, filter]);
   const typeLabels: Record<string, string> = {
     video: t("media.video"),
     image: t("media.image"),
@@ -74,12 +82,13 @@ export function Assets({ project, assetFilter, onAssetFilter, onOpenMedia }: Ass
                 </a>
               );
             }
+            // 视频缩略不挂 <video>，避免素材网格并发拉 metadata；点开 MediaDialog 再播。
             const thumb = type === "image"
               ? <img loading="lazy" src={src} alt="" />
               : type === "video"
                 ? (
                   <>
-                    <video muted preload="metadata" playsinline src={src} />
+                    <span class="assetVideoFallback" aria-hidden="true" />
                     <span class="assetPlay">▶</span>
                   </>
                 )
@@ -113,9 +122,18 @@ export function Assets({ project, assetFilter, onAssetFilter, onOpenMedia }: Ass
         </p>
       )}
       {filtered.length > visible.length ? (
-        <p class="sectionHint">
-          {t("assets.showing", { visible: visible.length, total: filtered.length })}
-        </p>
+        <div class="assetsMore">
+          <p class="sectionHint">
+            {t("assets.showing", { visible: visible.length, total: filtered.length })}
+          </p>
+          <button
+            type="button"
+            class="textButton"
+            onClick={() => setLimit(current => current + PAGE_SIZE)}
+          >
+            {t("assets.loadMore", { count: Math.min(PAGE_SIZE, filtered.length - visible.length) })}
+          </button>
+        </div>
       ) : null}
     </section>
   );

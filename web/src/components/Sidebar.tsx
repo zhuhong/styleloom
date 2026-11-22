@@ -130,7 +130,6 @@ export function Sidebar({
               <div
                 key={pack.id}
                 class="packItem"
-                title={t("nav.packHint", { id: pack.id })}
               >
                 <strong>{pack.title}</strong>
                 <p>{pack.summary}</p>
@@ -139,6 +138,7 @@ export function Sidebar({
                   {" · "}
                   {t("units.shots", { count: pack.shotCount })}
                 </p>
+                <p class="packHint">{t("nav.packHint", { id: pack.id })}</p>
               </div>
             ))
           )}

@@ -6,6 +6,12 @@ import type { AgentEvent } from "./types";
 function printEvent(event: AgentEvent) {
   if (event.type === "message") {
     console.log(`\n${event.role === "user" ? "你" : "Agent"}：${event.content}\n`);
+  } else if (event.type === "message_start") {
+    process.stdout.write("\nAgent：");
+  } else if (event.type === "message_delta") {
+    process.stdout.write(event.delta);
+  } else if (event.type === "message_end") {
+    process.stdout.write("\n\n");
   } else if (event.type === "tool_start") {
     console.log(`→ ${event.name} ${JSON.stringify(event.args).slice(0, 300)}`);
   } else if (event.type === "tool_end") {

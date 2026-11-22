@@ -37,7 +37,7 @@
  下一轮模型调用，直到无 tool_calls
 ```
 
-SSE 事件：`message`、`tool_start`、`progress`、`tool_end`、`state`、`error`、`ping`、`done`。心跳每 15 秒，防止代理断流。
+SSE 事件：`message`、`message_start` / `message_delta` / `message_end`（助手流式正文）、`tool_start`、`progress`、`tool_end`、`state`、`error`、`ping`、`done`。心跳每 15 秒，防止代理断流。流式优先；网关在收到任何增量前就失败时回退整段 `message`。
 
 上传链路：浏览器 `POST /api/projects/:id/uploads`（multipart，最多 6 个；也接受 `application/json` 的 `{ urls }` 由服务端代下载）→ 写入 `assets/uploads/` 并登记 `AssetRecord(kind=upload)`；聊天消息携带 `attachments`，发给模型前转成项目内路径文本块，模型再用 `set_shot_references` 绑定到分镜。
 
