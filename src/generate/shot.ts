@@ -114,6 +114,7 @@ export async function generateShot(options: GenerateShotOptions): Promise<Genera
         aspectRatio: project.brief.aspectRatio ?? options.settings.video.aspectRatio,
         references,
         skillIds: shot.skillIds,
+        project,
         signal,
       });
       prompt = composed.prompt;

@@ -111,11 +111,35 @@ export type StyleBible = {
   style?: { stylePrefix?: string };
 };
 
+export type MeasureManifest = {
+  version: 1;
+  createdAt: string;
+  grid: { cols: number; rows: number };
+  overall: {
+    palette: string[];
+    luma: number;
+    contrast: number;
+    cuts: { time: number; score: number }[];
+    cutsSource: "scene" | "interval";
+    durationStats: { min: number; median: number; max: number; mean: number };
+    silence: { start: number; end: number }[];
+    loudness?: { integrated: number; range: number };
+  };
+  shots: { shotId: string; palette: string[]; luma: number; contrast: number }[];
+};
+
 export type AssetRecord = {
   kind: string;
   path: string;
   label: string;
   meta?: Record<string, unknown>;
+};
+
+export type ShotVerification = {
+  at: string;
+  summary: string;
+  differences: { aspect: string; detail: string; severity: "minor" | "major" }[];
+  framePaths: string[];
 };
 
 export type PlanShot = {
@@ -130,6 +154,7 @@ export type PlanShot = {
   error?: string;
   skillIds?: string[];
   skillFeedback?: ShotSkillFeedback;
+  verification?: ShotVerification;
 };
 
 export type Project = {

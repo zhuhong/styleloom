@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { dataDir } from "../config";
-import type { AssetRecord, LearningState, Project, ProjectSummary, SliceManifest } from "../types";
+import type { AssetRecord, LearningState, MeasureManifest, Project, ProjectSummary, SliceManifest } from "../types";
 import { normalizeStyleBible } from "../learn/bible";
 import { exists, ensureDir, listDirs, nowIso, readJsonIfExists, removeDir, slugify, writeJson } from "../util/fs";
 
@@ -22,6 +22,10 @@ export function sessionFile(id: string) {
 
 export function manifestFile(id: string) {
   return join(projectDir(id), "learning", "slice.json");
+}
+
+export function measureFile(id: string) {
+  return join(projectDir(id), "learning", "measure.json");
 }
 
 export function emptyLearning(): LearningState {
@@ -202,6 +206,14 @@ export async function getManifest(project: Project): Promise<SliceManifest | und
 
 export async function saveManifest(project: Project, manifest: SliceManifest) {
   await writeJson(manifestFile(project.id), manifest);
+}
+
+export async function getMeasure(project: Project): Promise<MeasureManifest | undefined> {
+  return readJsonIfExists<MeasureManifest>(measureFile(project.id));
+}
+
+export async function saveMeasure(project: Project, measure: MeasureManifest) {
+  await writeJson(measureFile(project.id), measure);
 }
 
 export function addAsset(project: Project, asset: Omit<AssetRecord, "id" | "createdAt">): AssetRecord {

@@ -161,3 +161,138 @@ export async function extractAudio(path: string, output: string, signal?: AbortS
     output,
   ], { signal });
 }
+
+async function runFfmpegRawRgb(args: string[], expectedBytes: number, signal?: AbortSignal) {
+  const settings = await loadSettings();
+  if (signal?.aborted) throw signal.reason ?? new Error("已取消");
+  const proc = Bun.spawn([settings.ffmpeg.ffmpegPath, "-hide_banner", "-nostdin", ...args], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const abort = () => proc.kill();
+  signal?.addEventListener("abort", abort, { once: true });
+  try {
+    const [buffer, stderr, code] = await Promise.all([
+      new Response(proc.stdout).arrayBuffer(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    if (signal?.aborted) throw signal.reason ?? new Error("已取消");
+    if (code !== 0) {
+      const message = stderr.trim().split("\n").slice(-6).join("\n");
+      throw new Error(`ffmpeg 执行失败（退出码 ${code}）：${message || "无错误输出"}`);
+    }
+    const rgb = new Uint8Array(buffer);
+    if (rgb.byteLength < expectedBytes) {
+      throw new Error(`ffmpeg 输出字节不足：期望 ${expectedBytes}，实际 ${rgb.byteLength}`);
+    }
+    return rgb.subarray(0, expectedBytes);
+  } finally {
+    signal?.removeEventListener("abort", abort);
+  }
+}
+
+/** 从已有图片抽 cols×rows 的 RGB 网格，避免再 seek 源片。 */
+export async function sampleGridFromImage(path: string, cols: number, rows: number, signal?: AbortSignal) {
+  const width = Math.max(1, Math.floor(cols));
+  const height = Math.max(1, Math.floor(rows));
+  const rgb = await runFfmpegRawRgb([
+    "-y",
+    "-i", path,
+    "-frames:v", "1",
+    "-vf", `scale=${width}:${height}:flags=area`,
+    "-f", "rawvideo",
+    "-pix_fmt", "rgb24",
+    "-",
+  ], width * height * 3, signal);
+  return { rgb, width, height };
+}
+
+/** 从视频按时码抽 cols×rows RGB 网格（无关键帧时回退）。 */
+export async function sampleGrid(path: string, time: number, cols: number, rows: number, signal?: AbortSignal) {
+  const width = Math.max(1, Math.floor(cols));
+  const height = Math.max(1, Math.floor(rows));
+  const rgb = await runFfmpegRawRgb([
+    "-y",
+    "-ss", Math.max(0, time).toFixed(3),
+    "-i", path,
+    "-frames:v", "1",
+    "-vf", `scale=${width}:${height}:flags=area`,
+    "-f", "rawvideo",
+    "-pix_fmt", "rgb24",
+    "-",
+  ], width * height * 3, signal);
+  return { rgb, width, height };
+}
+
+/** 解析 silencedetect 的 silence_start / silence_end（通常在 stderr）。 */
+export function parseSilence(stderr: string) {
+  const segments: { start: number; end: number }[] = [];
+  let pendingStart: number | undefined;
+  for (const line of stderr.split("\n")) {
+    const startMatch = line.match(/silence_start:\s*([-\d.]+)/);
+    if (startMatch) {
+      pendingStart = Number(startMatch[1]);
+      continue;
+    }
+    const endMatch = line.match(/silence_end:\s*([-\d.]+)/);
+    if (endMatch && pendingStart !== undefined) {
+      const end = Number(endMatch[1]);
+      if (Number.isFinite(pendingStart) && Number.isFinite(end) && end > pendingStart) {
+        segments.push({ start: Number(pendingStart.toFixed(3)), end: Number(end.toFixed(3)) });
+      }
+      pendingStart = undefined;
+    }
+  }
+  return segments;
+}
+
+export async function detectSilence(path: string, signal?: AbortSignal) {
+  const settings = await loadSettings();
+  // silencedetect 写到 stderr；exit 0 时仍可能只有静音日志。
+  const result = await runProcess([
+    settings.ffmpeg.ffmpegPath,
+    "-hide_banner",
+    "-nostdin",
+    "-i", path,
+    "-af", "silencedetect=noise=-30dB:d=0.4",
+    "-f", "null",
+    "-",
+  ], { signal });
+  if (result.code !== 0) {
+    const message = result.stderr.trim().split("\n").slice(-6).join("\n");
+    throw new Error(`ffmpeg silencedetect 失败（退出码 ${result.code}）：${message || "无错误输出"}`);
+  }
+  return parseSilence(result.stderr);
+}
+
+/** 解析 ebur128 的 Integrated loudness 与 Loudness Range。 */
+export function parseLoudness(stderr: string) {
+  const integrated = stderr.match(/I:\s*([-\d.]+)\s*LUFS/i);
+  const range = stderr.match(/LRA:\s*([-\d.]+)\s*LU/i);
+  if (!integrated || !range) return undefined;
+  const i = Number(integrated[1]);
+  const lra = Number(range[1]);
+  if (!Number.isFinite(i) || !Number.isFinite(lra)) return undefined;
+  return { integrated: Number(i.toFixed(2)), range: Number(lra.toFixed(2)) };
+}
+
+export async function measureLoudness(path: string, signal?: AbortSignal) {
+  const settings = await loadSettings();
+  const result = await runProcess([
+    settings.ffmpeg.ffmpegPath,
+    "-hide_banner",
+    "-nostdin",
+    "-i", path,
+    "-af", "ebur128=framelog=verbose",
+    "-f", "null",
+    "-",
+  ], { signal });
+  if (result.code !== 0) {
+    const message = result.stderr.trim().split("\n").slice(-6).join("\n");
+    throw new Error(`ffmpeg ebur128 失败（退出码 ${result.code}）：${message || "无错误输出"}`);
+  }
+  const loudness = parseLoudness(result.stderr);
+  if (!loudness) throw new Error("无法解析 ebur128 响度输出");
+  return loudness;
+}

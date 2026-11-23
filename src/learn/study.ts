@@ -5,6 +5,7 @@ import { nowIso } from "../util/fs";
 import { saveProject } from "../store/projects";
 import { saveStylePack } from "../store/library";
 import { sliceVideo } from "./slice";
+import { measureReference } from "./measure";
 import { annotateShots } from "./annotate";
 import { distillStyleBible } from "./distill";
 import { extractSkillsFromStudy, type SkillExtractionResult } from "./skills";
@@ -28,7 +29,7 @@ export type StudyResult = {
   skillWarning?: string;
 };
 
-/** 完整学习链路：本地切片 → VLM 逐镜标注 → 风格圣经 → 可复用风格包。 */
+/** 完整学习链路：本地切片 → 客观测量 → VLM 逐镜标注 → 风格圣经 → 可复用风格包。 */
 export async function studyReferenceVideo(options: StudyOptions): Promise<StudyResult> {
   const { project, settings, sourcePath, signal, onProgress } = options;
   const file = await stat(sourcePath).catch(() => undefined);
@@ -43,13 +44,13 @@ export async function studyReferenceVideo(options: StudyOptions): Promise<StudyR
   await saveProject(project);
 
   try {
-    const manifest = await sliceVideo({
+    const { manifest, cuts } = await sliceVideo({
       project,
       sourcePath,
       settings,
       maxShots: options.maxShots,
       signal,
-      onProgress: (percent, label) => onProgress(Math.round(percent * 0.42), label),
+      onProgress: (percent, label) => onProgress(Math.round(percent * 0.38), label),
     });
     project.learning = {
       status: "annotating",
@@ -62,6 +63,21 @@ export async function studyReferenceVideo(options: StudyOptions): Promise<StudyR
       updatedAt: nowIso(),
     };
     await saveProject(project);
+
+    let measureWarning: string | undefined;
+    try {
+      await measureReference({
+        project,
+        manifest,
+        cuts,
+        sourcePath,
+        signal,
+        onProgress: (percent, label) => onProgress(38 + Math.round(percent * 0.04), label),
+      });
+    } catch (error) {
+      if (signal.aborted) throw error;
+      measureWarning = `客观测量失败，学习继续：${error instanceof Error ? error.message : String(error)}`;
+    }
 
     await annotateShots({
       project,
@@ -110,12 +126,12 @@ export async function studyReferenceVideo(options: StudyOptions): Promise<StudyR
     project.learning.skills = { created: skills.created.length, merged: skills.merged.length };
     project.learning.status = "done";
     project.learning.error = undefined;
-    project.learning.warning = [warning, skillWarning].filter(Boolean).join("；") || undefined;
+    project.learning.warning = [measureWarning, warning, skillWarning].filter(Boolean).join("；") || undefined;
     project.learning.updatedAt = nowIso();
     if (project.stage === "brief" || project.stage === "study") project.stage = "study";
     await saveProject(project);
     onProgress(100, "学习完成");
-    return { manifest, bible, skills, warning, skillWarning };
+    return { manifest, bible, skills, warning: project.learning.warning, skillWarning };
   } catch (error) {
     project.learning.status = "failed";
     project.learning.error = error instanceof Error ? error.message : String(error);

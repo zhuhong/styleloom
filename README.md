@@ -79,21 +79,24 @@ Everything else — data layout, persistent service, LAN access, reverse proxy, 
 ## Using it
 
 1. **Give it material** — a local video path, a Xiaohongshu note link, or just an idea.
-2. **It studies** — slice → per-shot annotation → style bible → skill extraction, with progress streamed to the page. Review the result and ask for corrections.
+2. **It studies** — slice → objective measure → per-shot annotation → style bible → skill extraction, with progress streamed to the page. Review the result and ask for corrections.
 3. **Stills** — `generate_still` for character / location references.
-4. **Plan and preview** — `plan_shots`, then `build_shot_prompt`. Both free.
+4. **Plan and preview** — `plan_shots`, then `build_shot_prompt`. Both free; `measure.json` injects palette/luma anchors when present.
 5. **Render** — `generate_shot(confirmed=true)` only after you have seen and approved the plan. Rendering runs as a background job: the chat returns immediately and progress streams into the **Render** tab on the right, so closing the page no longer cancels the render.
-6. **Give feedback** — say "that shot is good / meh / bad"; skill confidence updates and compounds across projects.
+6. **Verify (optional)** — `verify_shot` compares reference vs generated frames; on major diffs, revise the prompt and re-generate only after confirmation. Verification never feeds skill confidence.
+7. **Give feedback** — say "that shot is good / meh / bad"; skill confidence updates and compounds across projects.
 
 ## How it works
 
 | Stage | Module | What it does |
 | --- | --- | --- |
 | Slicing | `learn/slice.ts` | Scene-cut detection, keyframes, samples, reference clips, audio |
+| Measure | `learn/measure.ts` | Palette / luma / cuts / silence / loudness → `measure.json` (no LLM cost) |
 | Annotation | `learn/annotate.ts` | One vision request per shot, strict JSON, resumable |
 | Distillation | `learn/distill.ts` | Compress annotations into the style bible + reusable pack |
 | Skills | `learn/skills.ts`, `learn/stillSkills.ts` | 3–8 candidate skills per study (plus still-image skills derived from the bible), merged by similarity, scored by evidence |
 | Prompting | `generate/prompt.ts` | Picks T2VA / I2VA / FL2VA / L2VA / Ref2VA, then builds and validates the official H3 structure |
+| Verify | `generate/verify.ts` | Multi-image reference vs generated compare → `shot.verification` |
 | Rendering | `providers/video/`, `generate/jobs.ts` | icompify or a self-hosted gateway; runs as a detached background job |
 | Assembly | `generate/stitch.ts` | Normalize every clip, then hard-cut or crossfade into a final asset |
 
@@ -103,8 +106,8 @@ The agent is a thin scheduler over these; each stage is an independent function 
 src/
 ├── server.ts      Bun HTTP + SSE + static hosting
 ├── agent/         conversation loop, system prompt, tool handlers
-├── learn/         slice → annotate → distill → extract skills
-├── generate/      reference decision, H3 prompt, single shot, stills, stitching
+├── learn/         slice → measure → annotate → distill → extract skills
+├── generate/      reference decision, H3 prompt, verify, single shot, stills, stitching
 ├── providers/     llm / image / video / download — protocol only
 ├── store/         projects, manifests, sessions, style packs, skills
 └── util/          fs, ffmpeg, ssh, duration
@@ -116,6 +119,7 @@ docs/              deploy, local GPU, skills, xhs, H3 prompting, examples
 ## Cost and safety guards
 
 - `build_shot_prompt`, `plan_shots`, skill operations: **free**.
+- `verify_shot`: one vision compare, no `confirmed` gate; results do not enter skill confidence.
 - `generate_shot`: **billed**, and refuses to run without `confirmed=true`. The agent must show the plan and prompt and get explicit consent first.
 - A shot whose render is already submitted but abandoned locally becomes `pending`, not `failed`. `generate_shot` then refuses to re-render it (that would bill twice) — use `resume_shot` to keep polling the existing task for free.
 - API keys live only in `data/settings.json` (git-ignored, masked in API responses). A `pre-commit` hook rejects staged secrets.

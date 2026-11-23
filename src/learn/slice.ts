@@ -47,8 +47,14 @@ function sampleTimes(start: number, duration: number, count: number) {
   return times;
 }
 
+export type SliceResult = {
+  manifest: SliceManifest;
+  /** 本次 detectCuts 原始结果（含 score）；measure 只读，禁止再跑一遍 */
+  cuts: { time: number; score: number }[];
+};
+
 /** 本地拉片：检测切点，抽取关键帧/时序采样/镜头片段/原音轨。 */
-export async function sliceVideo(options: SliceOptions): Promise<SliceManifest> {
+export async function sliceVideo(options: SliceOptions): Promise<SliceResult> {
   const { project, sourcePath, settings, signal, onProgress } = options;
   const root = projectDir(project.id);
   const learningDir = join(root, "learning");
@@ -138,5 +144,5 @@ export async function sliceVideo(options: SliceOptions): Promise<SliceManifest> 
   };
   await saveManifest(project, manifest);
   onProgress(95, `已切出 ${shots.length} 个镜头`);
-  return manifest;
+  return { manifest, cuts };
 }

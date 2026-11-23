@@ -108,6 +108,8 @@ confidence = 0.32
 
 LLM 的自评 confidence 只用于候选排序，**不会**直接抬高置信度；必须靠独立证据或真实反馈。
 
+`learning/measure.json` 的客观测量（色板/亮度/切点/响度）与 `ShotPlan.verification` 的对照差异**都不进入**置信度公式；它们只服务提示词锚点与人工修订，不能当作技能升降级的质量分。
+
 ## Agent 怎么用
 
 1. 规划前 `search_skills`（中文关键词、kind 可选），命中后 `read_skill`。

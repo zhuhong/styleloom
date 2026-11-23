@@ -2,7 +2,8 @@ import { basename, extname, join } from "node:path";
 import { writeFile } from "node:fs/promises";
 import { dataDir, loadSettings, maskSettings, preserveSecrets, saveSettings, settingsPath, webDir, defaultSettings } from "./config";
 import { ensureDir, exists, readJsonIfExists, safeJoin, slugify, stamp } from "./util/fs";
-import { addAsset, createProject, deleteProject, getManifest, getProject, listProjects, mutateProject, projectDir, readSession, reconcileProjectAssets, renameProject, saveProject } from "./store/projects";
+import { addAsset, createProject, deleteProject, getManifest, getMeasure, getProject, listProjects, mutateProject, projectDir, readSession, reconcileProjectAssets, renameProject, saveProject } from "./store/projects";
+import { verifyShot } from "./generate/verify";
 import { listStylePacks } from "./store/library";
 import { getSkill, listSkills, recordSkillOutcome, recordSkillOutcomesForShot, searchSkills, skillEvidenceFile, skillToMarkdown, skillToSummary, updateSkill } from "./store/skills";
 import type { ChatAttachment, Project, SkillKind } from "./types";
@@ -421,6 +422,25 @@ const server = Bun.serve({
         });
         return json({ ok: true, skills: updated.map(skillToSummary), skillFeedback });
       }
+      const shotVerifyMatch = path.match(/^\/api\/projects\/([^/]+)\/shots\/([^/]+)\/verify$/);
+      if (shotVerifyMatch) {
+        if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+        const projectId = decodeURIComponent(shotVerifyMatch[1]);
+        const shotId = decodeURIComponent(shotVerifyMatch[2]);
+        const project = await getProject(projectId);
+        try {
+          const verification = await verifyShot({ project, shotId });
+          await mutateProject(projectId, latest => {
+            const target = latest.plan.find(item => item.id === shotId);
+            if (!target) return;
+            target.verification = verification;
+            target.updatedAt = verification.at;
+          });
+          return json({ ok: true, verification });
+        } catch (error) {
+          return json({ ok: false, error: messageOf(error) }, 400);
+        }
+      }
       const skillFileMatch = path.match(/^\/skill-files\/([^/]+)\/(.+)$/);
       if (skillFileMatch) {
         const skillId = decodeURIComponent(skillFileMatch[1]);
@@ -556,9 +576,11 @@ const server = Bun.serve({
         if (request.method !== "GET") return json({ error: "Method not allowed" }, 405);
         const project = await getProject(projectId);
         const manifest = await getManifest(project);
+        const measure = await getMeasure(project);
         const messages = await readSession<LlmMessage>(projectId);
         return json({
           project,
+          measure: measure ?? null,
           messages: historyMessages(messages),
           shots: manifest?.shots.map(shot => ({
             id: shot.id,

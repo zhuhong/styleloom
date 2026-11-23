@@ -1,4 +1,4 @@
-import type { Brief, LearningState, Project, ReferenceShot, StyleBible } from "../../lib/types";
+import type { Brief, LearningState, MeasureManifest, Project, ReferenceShot, StyleBible } from "../../lib/types";
 import {
   fileUrl,
   formatSeconds,
@@ -15,10 +15,11 @@ type OverviewProps = {
   bible: StyleBible | null | undefined;
   brief: Brief;
   learning: LearningState;
+  measure?: MeasureManifest | null;
   onOpenMedia: (media: MediaRequest) => void;
 };
 
-export function Overview({ project, shots, bible, brief, learning, onOpenMedia }: OverviewProps) {
+export function Overview({ project, shots, bible, brief, learning, measure, onOpenMedia }: OverviewProps) {
   const resolution = learning.sourceWidth && learning.sourceHeight
     ? `${learning.sourceWidth}×${learning.sourceHeight}`
   : "";
@@ -142,6 +143,61 @@ export function Overview({ project, shots, bible, brief, learning, onOpenMedia }
       )}
     </section>,
   ];
+
+  if (measure?.overall) {
+    const overall = measure.overall;
+    const stats = overall.durationStats;
+    sections.push(
+      <section key="measure" class="inspectorSection">
+        <div class="sectionHead">
+          <h3>{t("measure.title")}</h3>
+          <span class="count">{overall.cutsSource === "interval" ? t("measure.cutsInterval") : t("measure.cuts")}</span>
+        </div>
+        {overall.palette?.length ? (
+          <div class="paletteRow" aria-label={t("measure.title")}>
+            {overall.palette.map((hex) => (
+              <span key={hex} class="paletteSwatch" style={{ background: hex }} title={hex} />
+            ))}
+          </div>
+        ) : null}
+        <div class="statRow">
+          <span class="stat">
+            <b>{overall.luma}</b>
+            {t("measure.luma")}
+          </span>
+          <span class="stat">
+            <b>{overall.contrast}</b>
+            {t("measure.contrast")}
+          </span>
+          {stats ? (
+            <span class="stat">
+              <b>{stats.mean.toFixed(1)}s</b>
+              {t("measure.duration")}
+            </span>
+          ) : null}
+          <span class="stat">
+            <b>{overall.cuts?.length ?? 0}</b>
+            {t("measure.cuts")}
+          </span>
+          {overall.silence?.length ? (
+            <span class="stat">
+              <b>{overall.silence.length}</b>
+              {t("measure.silence")}
+            </span>
+          ) : null}
+        </div>
+      </section>,
+    );
+  } else if (learning.status === "done") {
+    sections.push(
+      <section key="measure-empty" class="inspectorSection">
+        <div class="sectionHead">
+          <h3>{t("measure.title")}</h3>
+        </div>
+        <p class="emptyHint">{t("measure.empty")}</p>
+      </section>,
+    );
+  }
 
   if (!bible) {
     sections.push(<p key="bible-empty" class="emptyHint">{t("bible.empty")}</p>);

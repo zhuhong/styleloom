@@ -1,9 +1,10 @@
-import type { Project, PromptMode, ShotPlan, StyleBible } from "../types";
+import type { MeasureManifest, Project, PromptMode, ShotPlan, StyleBible } from "../types";
 import { chat } from "../providers/llm";
 import { loadSettings } from "../config";
-import { getManifest } from "../store/projects";
+import { getManifest, getMeasure } from "../store/projects";
 import { loadSkillsByIds, skillPromptInjection } from "../store/skills";
 import { normalizeStyleBible } from "../learn/bible";
+import { measureStyleAnchor } from "../learn/measure";
 
 export type ReferenceImage = { path: string; label: string; role: "subject" | "location" };
 export type ReferenceVideo = { path: string; label: string; shotId?: string };
@@ -122,8 +123,15 @@ function subjectLines(shot: ShotPlan, bible?: StyleBible) {
   return clip(parts.join(" "), 900);
 }
 
-function commonDescription(shot: ShotPlan, bible: StyleBible | undefined, duration: number, skillText = "") {
+function commonDescription(
+  shot: ShotPlan,
+  bible: StyleBible | undefined,
+  duration: number,
+  skillText = "",
+  measureAnchor = "",
+) {
   const style = clip(bible?.style.stylePrefix ?? "Cinematic live-action with natural skin tones, motivated lighting and restrained color separation.", 320);
+  const measured = measureAnchor ? clip(measureAnchor, 220) : "";
   const anchors = bible?.prompting.consistencyAnchors?.length ? clip(`Keep consistent: ${bible.prompting.consistencyAnchors.join("; ")}.`, 560) : "";
   const subjects = subjectLines(shot, bible);
   const action = clip(shot.action || "The subject holds a subtle, natural pose and slowly shifts weight.", 900);
@@ -131,7 +139,7 @@ function commonDescription(shot: ShotPlan, bible: StyleBible | undefined, durati
   const lighting = clip(shot.lighting || bible?.style.lighting || "Motivated soft key light with natural falloff.", 420);
   const skills = skillText ? clip(skillText, 720) : "";
   const dialogue = dialogueBlock(shot.dialogue ?? "", shot.characterIds.length ? [subjectName(shot, bible)] : []);
-  return `[Shot 1] ${style} ${subjects} ${action} ${camera} ${lighting}${skills ? ` ${skills}` : ""}${dialogue ? ` ${dialogue}` : ""} The action runs for ${duration.toFixed(2)} seconds with physically plausible momentum, contact, secondary motion and a settled result. ${anchors}`.replace(/\s+/g, " ").trim();
+  return `[Shot 1] ${style}${measured ? ` ${measured}.` : ""} ${subjects} ${action} ${camera} ${lighting}${skills ? ` ${skills}` : ""}${dialogue ? ` ${dialogue}` : ""} The action runs for ${duration.toFixed(2)} seconds with physically plausible momentum, contact, secondary motion and a settled result. ${anchors}`.replace(/\s+/g, " ").trim();
 }
 
 function subjectName(shot: ShotPlan, bible?: StyleBible) {
@@ -155,9 +163,10 @@ export function buildPromptSkeleton(input: {
   duration: number;
   references: PreparedReferences;
   skillText?: string;
+  measureAnchor?: string;
 }) {
   const { shot, bible, mode, duration, references } = input;
-  const description = commonDescription(shot, bible, duration, input.skillText ?? "");
+  const description = commonDescription(shot, bible, duration, input.skillText ?? "", input.measureAnchor ?? "");
   const sound = `overall_soundscape: ${soundBlock(shot, bible)}`;
   const music = `non_diegetic_music: ${musicBlock(bible)}`;
   if (mode !== "ref2va") {
@@ -251,6 +260,8 @@ export async function composeShotPrompt(input: {
   aspectRatio: string;
   references: PreparedReferences;
   skillIds?: string[];
+  measure?: MeasureManifest;
+  project?: Project;
   signal?: AbortSignal;
 }): Promise<{ prompt: string; source: "llm" | "template"; problems: string[]; skillIds: string[] }> {
   const { shot, bible, mode, duration, aspectRatio, references } = input;
@@ -260,7 +271,9 @@ export async function composeShotPrompt(input: {
     ...skillBundle.fragments.map(fragment => `Apply craft guidance: ${fragment}.`),
     skillBundle.avoidWhen.length ? `Avoid: ${skillBundle.avoidWhen.join("; ")}.` : "",
   ].filter(Boolean).join(" ");
-  const skeleton = buildPromptSkeleton({ shot, bible, mode, duration, references, skillText });
+  const measure = input.measure ?? (input.project ? await getMeasure(input.project) : undefined);
+  const measureAnchor = measureStyleAnchor(measure);
+  const skeleton = buildPromptSkeleton({ shot, bible, mode, duration, references, skillText, measureAnchor });
   const settings = await loadSettings();
   if (!settings.llm.model.trim() || !settings.llm.baseUrl.trim()) {
     return { prompt: skeleton, source: "template", problems: [], skillIds };
@@ -282,6 +295,7 @@ export async function composeShotPrompt(input: {
     skillFragments: skillBundle.fragments,
     skillAvoidWhen: skillBundle.avoidWhen,
     style: bible?.style,
+    measure: measureAnchor || undefined,
     characters: shot.characterIds.map(id => bible?.characters.find(character => character.id === id)).filter(Boolean),
     location: bible?.locations.find(location => location.id === shot.locationId),
     consistencyAnchors: bible?.prompting.consistencyAnchors,
@@ -295,7 +309,7 @@ export async function composeShotPrompt(input: {
     const result = await chat({
       messages: [
         { role: "system", content: writingSystem },
-        { role: "user", content: `Create the final H3 prompt from this JSON:\n${JSON.stringify(payload)}\n\nIf skills / skillFragments are present, weave their promptFragment language into camera, lighting, action or style phrasing; honor skillAvoidWhen. Do not dump skill ids into the prompt.\n\nFallback skeleton for structure (improve it, keep the structure):\n${skeleton}` },
+        { role: "user", content: `Create the final H3 prompt from this JSON:\n${JSON.stringify(payload)}\n\nIf skills / skillFragments are present, weave their promptFragment language into camera, lighting, action or style phrasing; honor skillAvoidWhen. Do not dump skill ids into the prompt.\nIf measure is present, prefer those objective palette/luma anchors over invented color adjectives.\n\nFallback skeleton for structure (improve it, keep the structure):\n${skeleton}` },
       ],
       temperature: 0.4,
       maxTokens: 5000,

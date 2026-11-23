@@ -1,6 +1,7 @@
 import { useMemo, useRef } from "preact/hooks";
 import type {
   InspectorTab,
+  MeasureManifest,
   MediaRequest,
   Project,
   ReferenceShot,
@@ -22,6 +23,7 @@ import { Skills } from "./inspector/Skills";
 export type InspectorProps = {
   project: Project | null;
   shots: ReferenceShot[];
+  measure?: MeasureManifest | null;
   skills: SkillSummary[];
   jobs: RenderJob[];
   inspectorTab: InspectorTab | null;
@@ -36,8 +38,10 @@ export type InspectorProps = {
   onOpenMedia: (media: MediaRequest) => void;
   onResumeShot: (shotId: string) => void;
   onShotSkillOutcome?: (shotId: string, rating: SkillRating) => void;
+  onVerifyShot?: (shotId: string) => void;
   onSkillOutcome?: (skillId: string, rating: SkillRating) => void;
   skillFeedbackBusy?: string | null;
+  verifyBusy?: string | null;
   skillFeedbackNotes?: Record<string, { rating: SkillRating; count?: number }>;
   onCloseDrawer?: () => void;
 };
@@ -45,6 +49,7 @@ export type InspectorProps = {
 export function Inspector({
   project,
   shots,
+  measure,
   skills,
   jobs,
   inspectorTab,
@@ -59,8 +64,10 @@ export function Inspector({
   onOpenMedia,
   onResumeShot,
   onShotSkillOutcome,
+  onVerifyShot,
   onSkillOutcome,
   skillFeedbackBusy,
+  verifyBusy,
   skillFeedbackNotes,
   onCloseDrawer,
 }: InspectorProps) {
@@ -118,6 +125,7 @@ export function Inspector({
         bible={bible}
         brief={brief}
         learning={learning}
+        measure={measure}
         onOpenMedia={onOpenMedia}
       />
     );
@@ -129,7 +137,9 @@ export function Inspector({
         onOpenMedia={onOpenMedia}
         onTabChange={() => onTabChange("jobs")}
         onSkillOutcome={onShotSkillOutcome}
+        onVerifyShot={onVerifyShot}
         skillFeedbackBusy={skillFeedbackBusy}
+        verifyBusy={verifyBusy}
         skillFeedbackNotes={skillFeedbackNotes}
       />
     );

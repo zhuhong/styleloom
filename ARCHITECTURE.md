@@ -56,6 +56,16 @@ SSE 事件：`message`、`message_start` / `message_delta` / `message_end`（助
   - `clip.mp4`：按镜头边界重编码，供 Ref2VA 当参考视频；
   - 整片 `audio.m4a`。
 - 写入 `learning/slice.json`（`SliceManifest`）。
+- 原始切点 `{ time, score }[]` 一并返回给测量层（score 不在 `buildBoundaries` 里丢掉）。
+
+### 1.5 客观测量 `learn/measure.ts`
+
+- 插在切片与标注之间；失败只写 `learning.warning`，不拖垮整次学习。
+- 每镜对已有关键帧做 8×6 RGB 网格 → palette / luma / contrast（4-bit 量化计频，ACT：非感知聚类）。
+- 全片：沿用 slice 的 cuts（含 score）+ `cutsSource`、时长分布、silence、loudness（无音轨则跳过音频项）。
+- **禁止**再跑一遍 `detectCuts`。
+- 完整数据只进 `learning/measure.json`；**不**写入 `StyleBible`（避免 normalize/compact/pack 幽灵字段）。
+- `build_shot_prompt` / `composeShotPrompt` 直接读 measure，把色板与亮度锚点注入 style 段。
 
 ### 2. 逐镜标注 `learn/annotate.ts`
 
@@ -154,6 +164,14 @@ Agent 在规划前 `search_skills`、命中后 `read_skill`；`plan_shots` 记�
 2. **确定性骨架**：任何字段缺失、结构不对、对齐句被改写、或模型调用失败时回退。骨架本身保证结构合法。
 
 校验规则（`validatePrompt`）：字段齐全且顺序正确、对齐句逐字匹配、Ref2VA 必须有六段、长度 ≤ 7000。
+
+### 对照校验 `generate/verify.ts`
+
+- 工具 `verify_shot`：对已 `done` 且有 `video` 的分镜，抽成片帧与参考关键帧/采样帧，一次多图视觉调用（与 `annotate` 同款 `chatJson`，**不**走单图 `describeImage`）。
+- 结果写 `ShotPlan.verification`（summary + differences + framePaths）；**不进**技能置信度，**不改** `ShotStatus`。
+- 失败时不污染已有 verification。`plan_shots` 按 `shot.id` 合并保留 `verification` / `skillFeedback`。
+- `severity=major` 时 Agent 应建议改提示词 → `build_shot_prompt` → 用户确认后再生成；禁止因校验自动重跑计费出片。
+- 前端 Plan 卡有「对照校验」按钮；HTTP：`POST /api/projects/:id/shots/:shotId/verify`。
 
 ### 渲染是后台任务
 

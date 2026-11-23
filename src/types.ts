@@ -76,6 +76,31 @@ export type SliceManifest = {
   createdAt: string;
 };
 
+/** 客观测量：色板/亮度/切点/静音等，完整数据只进 learning/measure.json。 */
+export type ShotMeasurement = {
+  shotId: string;
+  palette: string[];
+  luma: number;
+  contrast: number;
+};
+
+export type MeasureManifest = {
+  version: 1;
+  createdAt: string;
+  grid: { cols: number; rows: number };
+  overall: {
+    palette: string[];
+    luma: number;
+    contrast: number;
+    cuts: { time: number; score: number }[];
+    cutsSource: "scene" | "interval";
+    durationStats: { min: number; median: number; max: number; mean: number };
+    silence: { start: number; end: number }[];
+    loudness?: { integrated: number; range: number };
+  };
+  shots: ShotMeasurement[];
+};
+
 export type CharacterSheet = {
   id: string;
   name: string;
@@ -210,6 +235,17 @@ export type ShotPlan = {
     rating: "good" | "mixed" | "bad";
     at: string;
     count: number;
+  };
+  /** 与参考镜头对照校验结果；不进技能置信度，也不改 status */
+  verification?: {
+    at: string;
+    summary: string;
+    differences: {
+      aspect: string;
+      detail: string;
+      severity: "minor" | "major";
+    }[];
+    framePaths: string[];
   };
   /** 生成模式；auto 时按素材自动选择 */
   generationMode?: GenerationMode;

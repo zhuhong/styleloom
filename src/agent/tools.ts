@@ -17,6 +17,7 @@ import { editImageWithModel } from "../providers/image";
 import { stitchShots } from "../generate/stitch";
 import { H3_SAFE_MIN_SECONDS, normalizeShotDuration } from "../util/duration";
 import { composeShotPrompt, prepareReferences } from "../generate/prompt";
+import { verifyShot } from "../generate/verify";
 import { downloadXhsVideo, extractUrlFromText, isXhsUrl } from "../providers/download/xhs";
 import { exportPublicSkill, findNearDuplicatePairs, listSkills, mergeSkills, readSkillResolved, recordSkillOutcome, searchSkills, skillToSummary, updateSkill } from "../store/skills";
 import { extractSkillsFromStudy } from "../learn/skills";
@@ -174,7 +175,7 @@ export const toolSpecs: ToolSpec[] = [
   },
   {
     name: "study_reference_video",
-    description: "学习参考视频：本地 ffmpeg 切片 → 视觉模型逐镜头拉片 → 归纳风格圣经（定妆照、场景照、运镜、节奏）。耗时数分钟。",
+    description: "学习参考视频：本地 ffmpeg 切片 → 客观测量（色板/亮度/切点/静音）→ 视觉模型逐镜头拉片 → 归纳风格圣经。耗时数分钟。测量失败不阻断学习。",
     parameters: {
       type: "object",
       properties: {
@@ -365,6 +366,15 @@ export const toolSpecs: ToolSpec[] = [
     parameters: {
       type: "object",
       properties: { shotId: { type: "string" } },
+      required: ["shotId"],
+    },
+  },
+  {
+    name: "verify_shot",
+    description: "对照参考镜头与已生成成片，用视觉模型报告具体差异（不自评还原度分数）。一次视觉调用，不要求 confirmed；按需使用，别每镜自动跑。结果写在 shot.verification，不进技能置信度、不改 status。若有 major 差异，应建议改提示词后经用户确认再 generate_shot。",
+    parameters: {
+      type: "object",
+      properties: { shotId: { type: "string", description: "已 status=done 且有 video 的分镜 id" } },
       required: ["shotId"],
     },
   },
@@ -655,6 +665,7 @@ async function planShots(ctx: ToolContext, args: Args) {
   if (!Array.isArray(raw) || !raw.length) throw new Error("shots 必须是非空数组");
   const bible = ctx.project.styleBible;
   const manifest = await getManifest(ctx.project);
+  const previousById = new Map(ctx.project.plan.map(shot => [shot.id, shot]));
   const plan: ShotPlan[] = raw.map((item, index) => {
     const value = record(item);
     const duration = normalizeShotDuration(value.durationSeconds ?? 5, `第 ${index + 1} 个镜头`);
@@ -670,8 +681,10 @@ async function planShots(ctx: ToolContext, args: Args) {
     if (manifest) {
       for (const id of referenceShotIds) if (!manifest.shots.some(shot => shot.id === id)) throw new Error(`参考镜头 id 不存在：${id}`);
     }
+    const id = `s${String(index + 1).padStart(2, "0")}`;
+    const previous = previousById.get(id);
     return {
-      id: `s${String(index + 1).padStart(2, "0")}`,
+      id,
       index: index + 1,
       title: optString(value, "title") ?? `镜头 ${index + 1}`,
       durationSeconds: duration,
@@ -689,6 +702,9 @@ async function planShots(ctx: ToolContext, args: Args) {
       lastFrame: optString(value, "lastFrame"),
       referenceImages: parseReferenceImages(value.referenceImages),
       referenceVideos: parseReferenceVideos(value.referenceVideos),
+      // 按 id 保留历史校验与技能反馈，避免整表替换抹掉
+      ...(previous?.verification ? { verification: previous.verification } : {}),
+      ...(previous?.skillFeedback ? { skillFeedback: previous.skillFeedback } : {}),
       status: "planned" as const,
       updatedAt: nowIso(),
     };
@@ -775,6 +791,7 @@ async function buildPrompt(ctx: ToolContext, args: Args) {
     aspectRatio: ctx.project.brief.aspectRatio ?? ctx.settings.video.aspectRatio,
     references,
     skillIds: shot.skillIds,
+    project: ctx.project,
     signal: ctx.signal,
   });
   shot.prompt = composed.prompt;
@@ -792,6 +809,37 @@ async function buildPrompt(ctx: ToolContext, args: Args) {
     prompt: composed.prompt,
     references: { firstFrame: references.firstFrame, images: references.images.map(image => image.path), videos: references.videos.map(video => video.path) },
   };
+}
+
+async function verifyShotTool(ctx: ToolContext, args: Args) {
+  const shotId = reqString(args, "shotId");
+  const shot = ctx.project.plan.find(item => item.id === shotId);
+  if (!shot) return { ok: false, error: `分镜不存在：${shotId}` };
+  try {
+    ctx.emit({ type: "progress", scope: "verify_shot", percent: 10, label: `对照校验 ${shotId}` });
+    const verification = await verifyShot({
+      project: ctx.project,
+      shotId,
+      signal: ctx.signal,
+    });
+    shot.verification = verification;
+    shot.updatedAt = nowIso();
+    await ctx.save();
+    ctx.emit({ type: "progress", scope: "verify_shot", percent: 100, label: "校验完成" });
+    return {
+      ok: true,
+      shotId,
+      summary: verification.summary,
+      majorCount: verification.differences.filter(item => item.severity === "major").length,
+      differences: verification.differences,
+      nextStep: verification.differences.some(item => item.severity === "major")
+        ? "存在 major 差异：建议改分镜描述 → build_shot_prompt → 用户确认后再 generate_shot；不要自动重跑计费生成"
+        : undefined,
+    };
+  } catch (error) {
+    // 失败不污染已有 verification
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 async function generateShotTool(ctx: ToolContext, args: Args) {
@@ -1188,6 +1236,7 @@ const handlers: Record<string, (ctx: ToolContext, args: Args) => Promise<unknown
   plan_shots: planShots,
   set_shot_references: setShotReferences,
   build_shot_prompt: buildPrompt,
+  verify_shot: verifyShotTool,
   generate_shot: generateShotTool,
   resume_shot: resumeShotTool,
   generate_still: generateStillTool,

@@ -13,7 +13,9 @@ type PlanProps = {
   onOpenMedia: (media: MediaRequest) => void;
   onTabChange: (tab: "jobs") => void;
   onSkillOutcome?: (shotId: string, rating: SkillRating) => void;
+  onVerifyShot?: (shotId: string) => void;
   skillFeedbackBusy?: string | null;
+  verifyBusy?: string | null;
   skillFeedbackNotes?: Record<string, { rating: SkillRating; count?: number }>;
 };
 
@@ -23,7 +25,9 @@ export function Plan({
   onOpenMedia,
   onTabChange,
   onSkillOutcome,
+  onVerifyShot,
   skillFeedbackBusy,
+  verifyBusy,
   skillFeedbackNotes,
 }: PlanProps) {
   const [editingShotIds, setEditingShotIds] = useState<Record<string, true>>({});
@@ -169,6 +173,46 @@ export function Plan({
                       ))}
                     </div>
                   )
+                ) : null}
+                {shot.status === "done" && shot.video && onVerifyShot ? (
+                  <div class="skillFeedbackRow">
+                    <button
+                      class="textButton"
+                      type="button"
+                      disabled={verifyBusy === shot.id}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onVerifyShot(shot.id);
+                      }}
+                    >
+                      {verifyBusy === shot.id ? t("plan.verifying") : t("plan.verify")}
+                    </button>
+                  </div>
+                ) : null}
+                {shot.verification ? (
+                  <details class="fold planDetails">
+                    <summary>
+                      {t("plan.verifySummary", { summary: shot.verification.summary })}
+                    </summary>
+                    {shot.verification.differences.length ? (
+                      <ul class="verifyList">
+                        {shot.verification.differences.map((diff, index) => (
+                          <li key={`${diff.aspect}-${index}`}>
+                            <span class={`verifySeverity ${diff.severity}`}>
+                              {diff.severity === "major" ? t("plan.verifyMajor") : t("plan.verifyMinor")}
+                            </span>
+                            {" "}
+                            <b>{diff.aspect}</b>
+                            {" · "}
+                            {diff.detail}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p class="muted">{t("plan.verifyEmpty")}</p>
+                    )}
+                  </details>
                 ) : null}
                 {shot.action ? (
                   <details class="fold planDetails">

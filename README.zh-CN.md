@@ -79,21 +79,24 @@ bun start            # http://127.0.0.1:8787
 ## 怎么用
 
 1. **给素材** —— 本地视频路径、小红书笔记链接，或直接说想法。
-2. **它开始学习** —— 切片 → 逐镜标注 → 风格圣经 → 抽技能，进度实时推送到页面。看完结果可以要求修正。
+2. **它开始学习** —— 切片 → 客观测量 → 逐镜标注 → 风格圣经 → 抽技能，进度实时推送到页面。看完结果可以要求修正。
 3. **出定妆照 / 场景照** —— `generate_still`。
-4. **写分镜并预览** —— `plan_shots`，再 `build_shot_prompt`。两步都免费。
+4. **写分镜并预览** —— `plan_shots`，再 `build_shot_prompt`。两步都免费；有 `measure.json` 时会注入客观色板/亮度。
 5. **生成** —— `generate_shot(confirmed=true)`，必须先看过并同意分镜与提示词。渲染是**后台任务**：对话立刻返回，进度实时显示在右侧「渲染」Tab，关掉页面也不会中断。
-6. **给反馈** —— 说某个镜头"好 / 一般 / 差"，技能置信度会更新并跨项目累积。
+6. **对照校验（可选）** —— `verify_shot` 对比参考帧与成片差异；有 major 差异时再改提示词并确认后重生成。校验不进技能置信度。
+7. **给反馈** —— 说某个镜头"好 / 一般 / 差"，技能置信度会更新并跨项目累积。
 
 ## 工作原理
 
 | 阶段 | 模块 | 作用 |
 | --- | --- | --- |
 | 切片 | `learn/slice.ts` | 场景切点检测、关键帧、采样、参考片段、音轨 |
+| 客观测量 | `learn/measure.ts` | 色板/亮度/切点/静音/响度落盘 `measure.json`（不花模型钱） |
 | 逐镜标注 | `learn/annotate.ts` | 每镜一次视觉请求，严格 JSON，可断点续跑 |
 | 归纳 | `learn/distill.ts` | 把标注压成风格圣经 + 可复用风格包 |
 | 技能抽取 | `learn/skills.ts`、`learn/stillSkills.ts` | 每次 3–8 条候选（另从风格圣经派生定妆照/场景照的出图技能），按相似度合并，靠证据评分 |
 | 提示词 | `generate/prompt.ts` | 自动选 T2VA / I2VA / FL2VA / L2VA / Ref2VA，生成并校验官方结构 |
+| 对照校验 | `generate/verify.ts` | 参考帧 vs 成片多图对照，写 `shot.verification` |
 | 生成 | `providers/video/`、`generate/jobs.ts` | icompify 或自建网关；后台任务，不阻塞对话 |
 | 拼接 | `generate/stitch.ts` | 统一转码后硬切或叠化成片 |
 
@@ -103,8 +106,8 @@ Agent 只是这些阶段的调度器，每一层都能单独运行。细节、�
 src/
 ├── server.ts      Bun HTTP + SSE + 静态托管
 ├── agent/         对话循环、系统提示词、工具实现
-├── learn/         切片 → 标注 → 归纳 → 抽技能
-├── generate/      参考决策、H3 提示词、单镜生成、定妆照、拼接
+├── learn/         切片 → 测量 → 标注 → 归纳 → 抽技能
+├── generate/      参考决策、H3 提示词、对照校验、单镜生成、定妆照、拼接
 ├── providers/     llm / image / video / download，只做协议转换
 ├── store/         项目、manifest、会话、风格包、技能
 └── util/          文件、ffmpeg、ssh、时长
@@ -116,6 +119,7 @@ docs/              部署、本地 GPU、技能、小红书、H3 提示词、示
 ## 费用与安全
 
 - `build_shot_prompt`、`plan_shots`、技能类操作：**免费**。
+- `verify_shot`：一次视觉对照，不要求 `confirmed`；结果不进技能置信度。
 - `generate_shot`：**计费**，没有 `confirmed=true` 一律拒绝；Agent 必须先展示分镜与提示词并取得明确同意。
 - 已提交但本地放弃等待的镜头会标为 `pending` 而不是 `failed`。此时 `generate_shot` 会拒绝重做（那会二次计费），改用 `resume_shot` 免费接回原任务。
 - API Key 只存在 `data/settings.json`（git 忽略、接口打码），`pre-commit` 钩子拦截密钥入库。

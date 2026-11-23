@@ -16,7 +16,8 @@ function learningSnapshot(project: Project) {
 运镜语法：${bible.cameraGrammar?.map(move => `${move.name}（例 ${move.exampleShotIds?.join("/") || "-"}）`).join("；") || "无"}
 节奏：平均 ${bible.rhythm?.averageShotSeconds ?? "-"} 秒/镜头；${bible.rhythm?.cutPattern ?? "-"}
 一致性锚点：${bible.prompting?.consistencyAnchors?.join("；") || "-"}
-必须避免：${bible.prompting?.avoid?.join("；") || "-"}`;
+必须避免：${bible.prompting?.avoid?.join("；") || "-"}
+客观测量：若存在 learning/measure.json，写提示词时优先引用其中的色板与亮度，别自造颜色形容词`;
 }
 
 function planSnapshot(project: Project) {
@@ -90,11 +91,12 @@ export async function buildSystemPrompt(project: Project, settings: Settings) {
 3. 需要定妆照/场景照：generate_still。角色和场景的 id 必须来自风格圣经。出图前可用 search_skills（kind=still 或 surface=still）看有哪些出图方法；不传 skillIds 时 generate_still 会自己检索并注入适用技能，传了则只用在提示词里。角色照优先「全身完整 + 无缝背景」，场景照优先「空景 + 陈设层次」，这些都是技能库里可复用的规则。用户要正方形/横版/竖版（1:1、16:9、9:16…）时必须显式传 ratio：不传会沿用项目 brief 的画幅，参考片是竖屏时生成的图就会一直是竖屏。
 3.5 改图的画幅同理：edit_image 的 ratio 不传就沿用项目 brief；要改比例就显式传。想在已有图片上改局部（换色、换装、加删道具、改姿态）：用 edit_image，原图路径来自 list_assets。它会另存为新素材、不覆盖原图；按张计费，必须先弹确认卡片（confirmed=false）再提交。提示词只描述要改的部分，并明确要求「其余保持不变」。
 4. plan_shots 写分镜：每个镜头 1-15 秒整数，默认 5-8 秒；只有用户明确要短镜头时才低于 4 秒。action / camera / lighting / sound / dialogue 用英文（dialogue 保留用户原文）。
-5. build_shot_prompt 预览提示词（不花钱）。
+5. build_shot_prompt 预览提示词（不花钱）。项目若有 learning/measure.json，会自动把客观色板/亮度锚点注入 style 段；写分镜时优先引用，别自造颜色形容词。
 6. 把「镜头表 + 关键提示词 + 预计总时长」展示给用户，明确询问是否开始生成。只有用户明确同意后，才调用 generate_shot（confirmed=true）。逐镜头生成，一次一个。
    generate_shot 是**后台任务**：它立刻返回 jobId，不等出片。进度显示在右侧「渲染」面板，关掉页面也不会中断。不要因为拿不到成品就一直等或轮询，也不要在回复里编造进度——直接告诉用户「已在后台开始渲染，完成后我会立刻在对话里通知你」，然后结束本轮。
    渲染进入 done/failed/pending 后，系统会往对话插入「后台渲染」通知，并在空闲时用「系统通知」自动唤起你。收到后立刻交代结果与下一步；对话里若已有完成通知，不要重复念长路径。不要重新 generate_shot。
    用户上传了图片/视频时，先用 list_assets 确认路径，再用 set_shot_references 绑定到具体分镜；不要假设上传文件就是首帧。
+6.5 用户关心与参考片一致性时，对已 done 的分镜可调用 verify_shot（一次视觉对照，不要求 confirmed）。按需调用，别每镜自动跑。若 differences 出现 severity=major：先改分镜描述 → build_shot_prompt → 征得用户同意后再 generate_shot；**不要**因校验结果自动重跑计费生成。校验结果不进技能置信度，也不改变镜头 status。
 7. 等所有镜头 status 变成 done 后，用 stitch_shots 拼接成片（本地 ffmpeg，不额外计费）；默认按分镜顺序硬切，需要转场时传 transitionSeconds。不要只给用户 ffmpeg 命令。如果还有镜头在渲染，先告诉用户「还有 N 个镜头在后台渲染」，不要拼半成品。
 8. 生成/拼接完成后用 list_assets 核对，向用户说明成片路径与镜头状态；要让用户直接看到画面，按「展示素材给用户」用返回的 url 内联。
 9. 生成超时或中断时任务可能仍在平台排队，且已经计费。用 resume_shot 接回（probeOnly=true 先查状态），**不要**直接重新 generate_shot —— 那会二次计费。镜头状态显示 pending 就表示「已提交、本地放弃等待」，必须 resume 或明确征得用户同意后传 force=true 重做。

@@ -5,6 +5,7 @@ import type {
   AppSettings,
   ChatAttachment,
   InspectorTab,
+  MeasureManifest,
   MediaRequest,
   Project,
   ProjectSummary,
@@ -13,6 +14,7 @@ import type {
   SkillRating,
   SkillSummary,
   ShotSkillFeedback,
+  ShotVerification,
   StylePackSummary,
 } from "./lib/types";
 import { ChatPane } from "./components/ChatPane";
@@ -43,6 +45,7 @@ export function App() {
   const [skills, setSkills] = useState<SkillSummary[]>([]);
   const [project, setProject] = useState<Project | null>(null);
   const [shots, setShots] = useState<ReferenceShot[]>([]);
+  const [measure, setMeasure] = useState<MeasureManifest | null>(null);
   const [input, setInput] = useState("");
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -52,6 +55,7 @@ export function App() {
   const [skillFilter, setSkillFilter] = useState("all");
   const [showAllSkills, setShowAllSkills] = useState(false);
   const [skillFeedbackBusy, setSkillFeedbackBusy] = useState<string | null>(null);
+  const [verifyBusy, setVerifyBusy] = useState<string | null>(null);
   /** 本会话临时覆盖；持久态来自 project.plan[].skillFeedback / skills[].lastOutcome。 */
   const [skillFeedbackOverrides, setSkillFeedbackOverrides] = useState<Record<string, { rating: SkillRating; count?: number }>>({});
   /** 窄屏下 Inspector / Sidebar 以抽屉形式打开。 */
@@ -102,9 +106,10 @@ export function App() {
   const refreshDetail = useCallback(async () => {
     const current = projectRef.current;
     if (!current) return;
-    const data = await api<{ project: Project; shots: ReferenceShot[] }>(`/api/projects/${encodeURIComponent(current.id)}`);
+    const data = await api<{ project: Project; shots: ReferenceShot[]; measure?: MeasureManifest | null }>(`/api/projects/${encodeURIComponent(current.id)}`);
     setProject(data.project);
     setShots(data.shots || []);
+    setMeasure(data.measure ?? null);
     await loadProjects();
   }, [loadProjects]);
 
@@ -235,6 +240,32 @@ export function App() {
     }
   }, [loadSkills, pushError]);
 
+  const handleVerifyShot = useCallback(async (shotId: string) => {
+    const current = projectRef.current;
+    if (!current) return;
+    setVerifyBusy(shotId);
+    try {
+      const result = await api<{ ok: boolean; verification?: ShotVerification; error?: string }>(
+        `/api/projects/${encodeURIComponent(current.id)}/shots/${encodeURIComponent(shotId)}/verify`,
+        { method: "POST", body: "{}" },
+      );
+      if (!result.ok || !result.verification) {
+        throw new Error(result.error || t("plan.verifying"));
+      }
+      setProject(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          plan: (prev.plan || []).map(shot => shot.id === shotId ? { ...shot, verification: result.verification } : shot),
+        };
+      });
+    } catch (error) {
+      pushError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setVerifyBusy(null);
+    }
+  }, [pushError]);
+
   const handleSkillOutcome = useCallback(async (skillId: string, rating: SkillRating) => {
     const current = projectRef.current;
     if (!current) {
@@ -264,14 +295,16 @@ export function App() {
     setSkillFilter("all");
     setShowAllSkills(false);
     setSkillFeedbackBusy(null);
+    setVerifyBusy(null);
     setSkillFeedbackOverrides({});
     setSidebarDrawerOpen(false);
     try {
-      const data = await api<{ project: Project; shots: ReferenceShot[]; messages: import("./lib/types").ChatMessage[] }>(
+      const data = await api<{ project: Project; shots: ReferenceShot[]; measure?: MeasureManifest | null; messages: import("./lib/types").ChatMessage[] }>(
         `/api/projects/${encodeURIComponent(id)}`,
       );
       setProject(data.project);
       setShots(data.shots || []);
+      setMeasure(data.measure ?? null);
       resetChatFromHistory(data.messages || []);
       connectJobs(id);
       // EventSource 之外再拉一次 REST，避免首包/重连空隙里右侧渲染队列空白。
@@ -290,6 +323,8 @@ export function App() {
     setShowAllSkills(false);
     setProject(null);
     setShots([]);
+    setMeasure(null);
+    setVerifyBusy(null);
     clearChat();
     connectJobs(null);
   }, [clearChat, clearPendingUploads, connectJobs]);
@@ -540,6 +575,7 @@ export function App() {
           className={inspectorDrawerOpen ? "drawerOpen" : ""}
           project={project}
           shots={shots}
+          measure={measure}
           skills={skills}
           jobs={jobs}
           inspectorTab={inspectorTab}
@@ -559,8 +595,10 @@ export function App() {
           onOpenMedia={setMedia}
           onResumeShot={shotId => void handleResumeShot(shotId)}
           onShotSkillOutcome={(shotId, rating) => void handleShotSkillOutcome(shotId, rating)}
+          onVerifyShot={shotId => void handleVerifyShot(shotId)}
           onSkillOutcome={(skillId, rating) => void handleSkillOutcome(skillId, rating)}
           skillFeedbackBusy={skillFeedbackBusy}
+          verifyBusy={verifyBusy}
           skillFeedbackNotes={skillFeedbackNotes}
           onCloseDrawer={() => setInspectorDrawerOpen(false)}
         />
